@@ -3,7 +3,7 @@ name: "Release (body recognition models)"
 on:
     workflow_dispatch:
     push:
-        branches: [feat/body-reid]
+        branches: [main, feat/body-reid]
         paths:
             - ".github/workflows/body-reid-models.yml"
             - "rust/tools/body-reid/export.py"
