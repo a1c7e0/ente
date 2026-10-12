@@ -75,6 +75,7 @@ class DartMLDataDB
     createPetFaceVectorIdMappingTable,
     createPetBodyVectorIdMappingTable,
     createMlStoreMetaTable,
+    createBodyIndexTable,
   ];
   static const List<String> _localGalleryMigrationScripts = [
     ..._defaultMigrationScripts,
@@ -89,6 +90,35 @@ class DartMLDataDB
 
   @override
   Logger get logger => _logger;
+
+  @override
+  Future<Map<int, String>> bodyIndexes({int minimumVersion = 1}) async {
+    final rows = await (await asyncDB).getAll(
+      "SELECT file_id, data FROM body_index WHERE ml_version >= ?",
+      [minimumVersion],
+    );
+    return {
+      for (final row in rows) row["file_id"] as int: row["data"] as String,
+    };
+  }
+
+  @override
+  Future<void> putBodyIndex(int fileID, String data, int version) async {
+    await (await asyncDB).execute(
+      "INSERT INTO body_index(file_id, data, ml_version) VALUES (?, ?, ?) ON CONFLICT(file_id) DO UPDATE SET data=excluded.data, ml_version=excluded.ml_version",
+      [fileID, data, version],
+    );
+  }
+
+  @override
+  Future<void> deleteBodyIndexes(List<int> fileIDs) async {
+    for (final chunk in fileIDs.chunks(_maxSqlBindParamsPerQuery)) {
+      await (await asyncDB).execute(
+        "DELETE FROM body_index WHERE file_id IN (${SqlDbBase.getParams(chunk.length)})",
+        chunk,
+      );
+    }
+  }
 
   Future<SqliteDatabase> get asyncDB =>
       getOrOpenDatabase(_initSqliteAsyncDatabase);
@@ -336,6 +366,7 @@ class DartMLDataDB
     await db.execute(deleteNotPersonFeedbackTable);
     await db.execute(deleteClipEmbeddingsTable);
     await db.execute(deleteFileDataTable);
+    await db.execute("DELETE FROM body_index");
   }
 
   @override

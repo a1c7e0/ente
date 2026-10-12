@@ -19,6 +19,7 @@ import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/face_thumbnail_squircle.dart";
 import "package:photos/ui/viewer/people/file_face_widget.dart";
+import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/person_clusters_page.dart";
 import "package:photos/ui/viewer/people/save_or_edit_person.dart";
 import "package:photos/utils/face/face_thumbnail_cache.dart";
@@ -313,7 +314,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     int numberOfSuggestions,
   ) async {
     canGiveFeedback = false;
-    await mlDataDB.captureNotPersonFeedback(
+    await ClusterFeedbackService.instance.rejectSuggestion(
       personID: widget.person.remoteID,
       clusterID: clusterID,
     );
@@ -348,12 +349,33 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
       final clusterID = currentSuggestion.clusterIDToMerge;
       final someFile = currentSuggestion.filesInCluster.first;
 
-      final result = await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) =>
-              SaveOrEditPerson(clusterID, file: someFile, isEditing: false),
-        ),
-      );
+      final result = clusterID.startsWith("body:")
+          ? await showMergeClustersToPersonPage(context)
+          : await Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => SaveOrEditPerson(
+                  clusterID,
+                  file: someFile,
+                  isEditing: false,
+                ),
+              ),
+            );
+      if (result is MergePersonSelectionResult) {
+        final selected =
+            result.person ??
+            await PersonService.instance.getPerson(result.personId);
+        if (selected == null) return;
+        if (selected.remoteID != currentSuggestion.person.remoteID) {
+          await ClusterFeedbackService.instance.rejectSuggestion(
+            personID: currentSuggestion.person.remoteID,
+            clusterID: clusterID,
+          );
+        }
+        await ClusterFeedbackService.instance.addClusterToExistingPerson(
+          person: selected,
+          clusterID: clusterID,
+        );
+      }
       if (result == null || result == false) {
         return;
       }
@@ -552,7 +574,12 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   Future<void> _undoLastFeedback() async {
     if (pastUserFeedback.isNotEmpty) {
       final SuggestionUserFeedback lastFeedback = pastUserFeedback.removeLast();
-      if (lastFeedback.accepted) {
+      if (lastFeedback.suggestion.clusterIDToMerge.startsWith("body:")) {
+        await ClusterFeedbackService.instance.undoSuggestion(
+          widget.person,
+          lastFeedback.suggestion.clusterIDToMerge,
+        );
+      } else if (lastFeedback.accepted) {
         await PersonService.instance.removeClusterToPerson(
           personID: widget.person.remoteID,
           clusterID: lastFeedback.suggestion.clusterIDToMerge,

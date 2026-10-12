@@ -13,19 +13,23 @@ import "package:photos/db/offline_files_db.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart"
     show flagService, isLocalGalleryMode;
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_filtering/face_filtering_constants.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart"
     show ManualPersonAssignmentResult, PersonService;
+import "package:photos/services/search_service.dart";
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/components/buttons/button_widget.dart";
 import "package:photos/ui/components/models/button_type.dart";
 import "package:photos/ui/viewer/file_details/file_info_face_widget.dart";
 import "package:photos/ui/viewer/people/add_files_to_person_page.dart";
+import "package:photos/ui/viewer/people/file_face_widget.dart";
 import "package:photos/ui/viewer/people/people_page.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
 import "package:photos/utils/dialog_util.dart";
@@ -52,6 +56,7 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
   List<_FaceInfo> _defaultFaces = [];
   List<_FaceInfo> _remainingFaces = [];
   List<PersonEntity> _manualPersons = [];
+  Map<String, BodyMatch> _automaticBodies = {};
   NoFacesReason? _errorReason;
   late final StreamSubscription<PeopleChangedEvent> _peopleChangedEvent;
 
@@ -170,6 +175,8 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
           onTap: () => _openPersonPage(person),
           isEditMode: _isEditMode,
           onRemove: () => _onRemoveManualPerson(person),
+          bodyID: _automaticBodies[person.remoteID]?.detection.bodyID,
+          bodyFile: widget.file,
         ),
       );
     }
@@ -282,7 +289,8 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
       if (existingPersonIDs.contains(person.remoteID)) {
         return false;
       }
-      return person.data.manuallyAssigned.contains(uploadedFileID);
+      return person.data.manuallyAssigned.contains(uploadedFileID) ||
+          _automaticBodies.containsKey(person.remoteID);
     }).toList();
 
     manualPersons.sort(
@@ -620,6 +628,18 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
     final persons = isLocalGallery
         ? <String, PersonEntity>{}
         : await PersonService.instance.getPersonsMap();
+    _automaticBodies = {};
+    if (!isLocalGallery) {
+      for (final match in await BodyRecognitionService.instance.matches(
+        await SearchService.instance.getAllFilesForSearch(),
+      )) {
+        if (match.automatic &&
+            match.fileID == fileKey &&
+            persons.containsKey(match.personID)) {
+          _automaticBodies[match.personID] = match;
+        }
+      }
+    }
 
     final mlDataDB = isLocalGallery
         ? MLDataDB.localGalleryInstance
@@ -831,6 +851,8 @@ class _FaceInfo {
 }
 
 class _ManualPersonTag extends StatelessWidget {
+  final String? bodyID;
+  final EnteFile? bodyFile;
   final PersonEntity person;
   final double thumbnailWidth;
   final VoidCallback onTap;
@@ -844,6 +866,8 @@ class _ManualPersonTag extends StatelessWidget {
     required this.onTap,
     this.isEditMode = false,
     this.onRemove,
+    this.bodyID,
+    this.bodyFile,
   });
 
   @override
@@ -874,10 +898,12 @@ class _ManualPersonTag extends StatelessWidget {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(Radii.button),
-                      child: PersonFaceWidget(
-                        personId: person.remoteID,
-                        keepAlive: true,
-                      ),
+                      child: bodyID != null
+                          ? FileFaceWidget(bodyFile!, clusterID: bodyID)
+                          : PersonFaceWidget(
+                              personId: person.remoteID,
+                              keepAlive: true,
+                            ),
                     ),
                   ),
                   if (isEditMode)

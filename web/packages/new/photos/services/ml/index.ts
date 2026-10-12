@@ -345,19 +345,39 @@ export const getAnnotatedFacesForFile = async (
     if (!isMLEnabled()) return [];
 
     const index = await savedFaceIndex(file.id);
-    if (!index) return [];
 
     const personByFaceID = _state.peopleStateSnapshot?.personByFaceID;
     if (!personByFaceID) return [];
 
     const sortableFaces: [AnnotatedFaceID, number][] = [];
-    for (const { faceID } of index.faces) {
+    for (const { faceID } of index?.faces ?? []) {
         const person = personByFaceID.get(faceID);
         if (!person) continue;
         sortableFaces.push([
             { faceID, personID: person.id, personName: person.name },
             person.fileIDs.length,
         ]);
+    }
+
+    const { currentBodyMatches } = await import("./body-review");
+    const { isAutomaticBodyMatch } = await import("./body");
+    const { computeNormalCollectionFilesFromSaved } = await import("../file");
+    for (const match of await currentBodyMatches(
+        await computeNormalCollectionFilesFromSaved(),
+    )) {
+        if (match.fileID != file.id || !isAutomaticBodyMatch(match)) continue;
+        const person = _state.peopleStateSnapshot?.people.find(
+            (p) => p.id == match.personID,
+        );
+        if (person)
+            sortableFaces.push([
+                {
+                    faceID: match.detection.bodyID,
+                    personID: person.id,
+                    personName: person.name,
+                },
+                person.fileIDs.length,
+            ]);
     }
 
     sortableFaces.sort((a, b) => {
@@ -369,6 +389,26 @@ export const getAnnotatedFacesForFile = async (
 };
 
 export const faceCrop = async (faceID: string, file: EnteFile) => {
+    if (faceID.startsWith("body:")) {
+        const cached = _state.faceCropObjectURLCache.get(faceID);
+        if (cached) return cached;
+        const { bodyWithID } = await import("./body-review");
+        const { extractFaceCrop } = await import("./crop");
+        const { fetchRenderableEnteFileBlob } = await import("./blob");
+        const { detection } = await bodyWithID(faceID);
+        const bitmap = await createImageBitmap(
+            await fetchRenderableEnteFileBlob(file),
+        );
+        try {
+            const url = URL.createObjectURL(
+                await extractFaceCrop(bitmap, detection.box),
+            );
+            _state.faceCropObjectURLCache.set(faceID, url);
+            return url;
+        } finally {
+            bitmap.close();
+        }
+    }
     // Returned object URLs are cache-owned; callers must not revoke them.
     let inFlight = _state.inFlightFaceCropRegens.get(file.id);
 

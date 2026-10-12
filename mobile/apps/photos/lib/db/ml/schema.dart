@@ -248,6 +248,14 @@ const deletePetBodyVectorIdMappingTable =
 
 const mlStoreMetaTable = 'ml_store_meta';
 
+const createBodyIndexTable = '''
+CREATE TABLE IF NOT EXISTS body_index (
+  file_id INTEGER PRIMARY KEY NOT NULL,
+  data TEXT NOT NULL,
+  ml_version INTEGER NOT NULL
+);
+''';
+
 const createMlStoreMetaTable =
     '''
 CREATE TABLE IF NOT EXISTS $mlStoreMetaTable (

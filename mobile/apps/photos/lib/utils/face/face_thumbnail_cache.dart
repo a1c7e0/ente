@@ -16,6 +16,7 @@ import "package:photos/models/ml/face/face.dart";
 import "package:photos/module/download/file.dart";
 import "package:photos/module/download/thumbnail.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_thumbnail_generator.dart";
 
 final _logger = Logger("FaceCropUtils");
@@ -282,6 +283,10 @@ Future<Uint8List?> precomputeClusterFaceCrop(
   required bool useFullFile,
 }) async {
   try {
+    if (clusterID.startsWith("body:")) {
+      final crops = await BodyRecognitionService.instance.crop(file, clusterID);
+      return crops[file.uploadedFileID];
+    }
     final w = (kDebugMode ? EnteWatch('precomputeClusterFaceCrop') : null)
       ?..start();
     final Face? face = await MLDataDB.instance.getCoverFaceForPerson(

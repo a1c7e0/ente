@@ -181,6 +181,22 @@ pub struct MlStore {
 }
 
 impl MlStore {
+    pub fn body_indexes(&self, minimum_version: i64) -> Result<HashMap<i64, String>, MlDbError> {
+        Ok(self.inner.db().body_indexes(minimum_version)?)
+    }
+
+    pub fn put_body_index(
+        &self,
+        file_id: i64,
+        data: String,
+        version: i64,
+    ) -> Result<(), MlDbError> {
+        Ok(self.inner.db().put_body_index(file_id, &data, version)?)
+    }
+
+    pub fn delete_body_indexes(&self, file_ids: Vec<i64>) -> Result<(), MlDbError> {
+        Ok(self.inner.db().delete_body_indexes(&file_ids)?)
+    }
     pub fn open(path: String) -> Result<MlStore, MlDbError> {
         Ok(Self {
             inner: ml_store::MlStore::open(path)?,

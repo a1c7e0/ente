@@ -18,6 +18,7 @@ import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_clustering_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_filtering/face_filtering_constants.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
@@ -154,6 +155,7 @@ class ClusterFeedbackService<T> {
         'getSuggestionForPerson post-processing suggestions took ${DateTime.now().difference(findSuggestionsTime).inMilliseconds} ms, of which sorting took ${DateTime.now().difference(sortingStartTime).inMilliseconds} ms and getting files took ${getFilesTime.difference(findSuggestionsTime).inMilliseconds} ms',
       );
 
+      finalSuggestions.addAll(await _bodySuggestions(person));
       return finalSuggestions;
     } catch (e, s) {
       _logger.severe("Error in getClusterFilesForPersonID", e, s);
@@ -171,6 +173,25 @@ class ClusterFeedbackService<T> {
           .map((file) => file.uploadedFileID)
           .whereType<int>()
           .toSet();
+      bool removedBody = false;
+      final bodyFiles = await SearchService.instance.getAllFilesForSearch();
+      for (final match in await BodyRecognitionService.instance.matches(
+        bodyFiles,
+      )) {
+        if (match.personID == p.remoteID &&
+            match.automatic &&
+            fileIDsToRemove.contains(match.fileID)) {
+          final file = files.firstWhere(
+            (f) => f.uploadedFileID == match.fileID,
+          );
+          await BodyRecognitionService.instance.reject(
+            p.remoteID,
+            file,
+            match.detection.bodyID,
+          );
+          removedBody = true;
+        }
+      }
 
       final manualFileIDs = p.data.manuallyAssigned.toSet();
       final manualToRemove = manualFileIDs.intersection(fileIDsToRemove);
@@ -199,7 +220,7 @@ class ClusterFeedbackService<T> {
         if (manualAssignmentUpdate != null) {
           await manualAssignmentUpdate;
         }
-        if (manualToRemove.isNotEmpty) {
+        if (manualToRemove.isNotEmpty || removedBody) {
           Bus.instance.fire(PeopleChangedEvent());
         } else {
           _logger.warning(
@@ -381,6 +402,80 @@ class ClusterFeedbackService<T> {
   }
 
   Future<List<ClusterSuggestion>> getAllLargePersonSuggestions() async {
+    final faces = await _getAllLargeFaceSuggestions();
+    faces.addAll(await _bodySuggestions());
+    return faces;
+  }
+
+  Future<List<ClusterSuggestion>> _bodySuggestions([
+    PersonEntity? target,
+  ]) async {
+    final files = await SearchService.instance.getAllFilesForSearch();
+    final fileByID = {for (final file in files) file.uploadedFileID: file};
+    final persons = await PersonService.instance.getPersonsMap();
+    final result = <ClusterSuggestion>[];
+    for (final match in await BodyRecognitionService.instance.matches(files)) {
+      if (target != null && match.personID != target.remoteID) continue;
+      final person = persons[match.personID];
+      final file = fileByID[match.fileID];
+      if (person == null ||
+          person.data.isIgnored ||
+          file == null ||
+          person.data.manuallyAssigned.contains(match.fileID)) {
+        continue;
+      }
+      result.add(
+        ClusterSuggestion(
+          person,
+          match.detection.bodyID,
+          1 - match.similarity,
+          false,
+          [file],
+          const [],
+        ),
+      );
+    }
+    return result;
+  }
+
+  Future<void> rejectSuggestion({
+    required String personID,
+    required String clusterID,
+  }) async {
+    if (clusterID.startsWith("body:")) {
+      final file = await _bodyFile(clusterID);
+      await BodyRecognitionService.instance.reject(personID, file, clusterID);
+      return;
+    }
+    await mlDataDB.captureNotPersonFeedback(
+      personID: personID,
+      clusterID: clusterID,
+    );
+  }
+
+  Future<void> undoSuggestion(PersonEntity person, String clusterID) async {
+    if (clusterID.startsWith("body:")) {
+      await BodyRecognitionService.instance.undo(
+        person,
+        await _bodyFile(clusterID),
+        clusterID,
+      );
+      return;
+    }
+    await mlDataDB.removeNotPersonFeedback(
+      personID: person.remoteID,
+      clusterID: clusterID,
+    );
+  }
+
+  Future<EnteFile> _bodyFile(String bodyID) async {
+    final id = int.parse(bodyID.substring(5).split("_").first);
+    final file = await FilesDB.instance.getAnyUploadedFile(id);
+    if (file == null) throw StateError("Missing body photo $id");
+    return file;
+  }
+
+  Future<List<ClusterSuggestion>> _getAllLargeFaceSuggestions() async {
     final personsMap = await PersonService.instance.getPersonsMap();
     if (personsMap.isEmpty) return [];
     try {
@@ -1246,6 +1341,21 @@ class ClusterFeedbackService<T> {
     required PersonEntity person,
     required String clusterID,
   }) async {
+    if (clusterID.startsWith("body:")) {
+      await BodyRecognitionService.instance.accept(
+        person,
+        await _bodyFile(clusterID),
+        clusterID,
+      );
+      Bus.instance.fire(
+        PeopleChangedEvent(
+          type: PeopleEventType.addedClusterToPerson,
+          source: clusterID,
+        ),
+      );
+      return;
+    }
+
     if (person.data.rejectedFaceIDs.isNotEmpty) {
       final clusterFaceIDs = await mlDataDB.getFaceIDsForCluster(clusterID);
       final rejectedLengthBefore = person.data.rejectedFaceIDs.length;

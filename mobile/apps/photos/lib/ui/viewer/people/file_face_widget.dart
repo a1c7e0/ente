@@ -83,7 +83,14 @@ class _FileFaceWidgetState extends State<FileFaceWidget> {
               : MemoryImage(snapshot.data!);
           return Stack(
             fit: StackFit.expand,
-            children: [Image(image: imageProvider, fit: BoxFit.cover)],
+            children: [
+              Image(
+                image: imageProvider,
+                fit: widget.clusterID?.startsWith("body:") == true
+                    ? BoxFit.contain
+                    : BoxFit.cover,
+              ),
+            ],
           );
         } else {
           if (snapshot.hasError) {
@@ -106,6 +113,13 @@ class _FileFaceWidgetState extends State<FileFaceWidget> {
       return widget.faceCrop;
     }
     try {
+      if (widget.clusterID?.startsWith("body:") == true) {
+        return await precomputeClusterFaceCrop(
+          widget.file,
+          widget.clusterID!,
+          useFullFile: widget.useFullFile,
+        );
+      }
       final mlDataDB = isLocalGalleryMode
           ? MLDataDB.localGalleryInstance
           : MLDataDB.instance;

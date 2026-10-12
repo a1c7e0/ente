@@ -53,6 +53,7 @@ import "package:photos/services/contacts/direct_contact_users.dart";
 import "package:photos/services/date_parse_service.dart";
 import "package:photos/services/filter/db_filters.dart";
 import "package:photos/services/location_service.dart";
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import 'package:photos/services/machine_learning/semantic_search/semantic_search_service.dart';
 import "package:photos/services/memories_cache_service.dart";
@@ -1283,6 +1284,15 @@ class SearchService {
         }
       }
     }
+    final bodyMatches = await BodyRecognitionService.instance.matches(
+      uploadedIdToFile.values.toList(),
+    );
+    for (final match in bodyMatches.where(
+      (m) => m.personID == personID && m.automatic,
+    )) {
+      final file = uploadedIdToFile[match.fileID];
+      if (file != null && addedFileIDs.add(match.fileID)) files.add(file);
+    }
     if (sortOnTime) {
       files.sort(
         (a, b) => (b.creationTime ?? 0).compareTo(a.creationTime ?? 0),
@@ -1450,6 +1460,25 @@ class SearchService {
             filesForPerson.add(file);
             idSet.add(manualID);
           }
+        }
+      }
+
+      for (final match in await BodyRecognitionService.instance.matches(
+        uploadedIdToFile.values.toList(),
+      )) {
+        if (!match.automatic || !personIdToPerson.containsKey(match.personID)) {
+          continue;
+        }
+        final file = uploadedIdToFile[match.fileID];
+        if (file == null) continue;
+        final ids = personIdToFileIds.putIfAbsent(
+          match.personID,
+          () => <int>{},
+        );
+        if (ids.add(match.fileID)) {
+          personIdToFiles
+              .putIfAbsent(match.personID, () => <EnteFile>[])
+              .add(file);
         }
       }
 

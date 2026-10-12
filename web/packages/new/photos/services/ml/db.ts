@@ -1,10 +1,12 @@
 import log from "ente-base/log";
 import { deleteDB, openDB, type DBSchema } from "idb";
+import type { LocalBodyIndex } from "./body";
 import type { LocalCLIPIndex } from "./clip";
 import type { FaceCluster } from "./cluster";
 import type { LocalFaceIndex } from "./face";
 
 interface MLDBSchema extends DBSchema {
+    "body-index": { key: number; value: LocalBodyIndex };
     "file-status": {
         key: number;
         value: FileStatus;
@@ -20,13 +22,15 @@ interface FileStatus {
     fileID: number;
     status: "indexable" | "indexed" | "failed";
     failureCount: number;
+    bodyFailureCount?: number;
+    bodyVersion?: number;
 }
 
 // Workers cache separate connections; terminate them before deleting this DB.
 let _mlDB: ReturnType<typeof openMLDB> | undefined;
 
 const openMLDB = async () => {
-    const db = await openDB<MLDBSchema>("ml", 1, {
+    const db = await openDB<MLDBSchema>("ml", 2, {
         upgrade(db, oldVersion, newVersion) {
             log.info(`Upgrading ML DB ${oldVersion} => ${newVersion}`);
             if (oldVersion < 1) {
@@ -38,6 +42,8 @@ const openMLDB = async () => {
                 db.createObjectStore("face-cluster", { keyPath: "id" });
                 db.createObjectStore("cluster-group", { keyPath: "id" });
             }
+            if (oldVersion < 2)
+                db.createObjectStore("body-index", { keyPath: "fileID" });
         },
         blocking() {
             log.info(
@@ -91,10 +97,16 @@ export const saveIndexes = async (
         "readwrite",
     );
 
+    const previousStatus = await tx.objectStore("file-status").get(fileID);
     await Promise.all([
         tx
             .objectStore("file-status")
-            .put({ fileID, status: "indexed", failureCount: 0 }),
+            .put({
+                ...previousStatus,
+                fileID,
+                status: "indexed",
+                failureCount: 0,
+            }),
         tx.objectStore("face-index").put(faceIndex),
         tx.objectStore("clip-index").put(clipIndex),
         tx.done,
@@ -122,13 +134,42 @@ export const savedCLIPIndexes = async () => {
     return await db.getAll("clip-index");
 };
 
+export const savedBodyIndexes = async () => (await mlDB()).getAll("body-index");
+export const deleteBodyIndex = async (fileID: number) =>
+    (await mlDB()).delete("body-index", fileID);
+export const saveBodyIndex = async (index: LocalBodyIndex) =>
+    (await mlDB()).put("body-index", index);
+
+export const recordBodyVersion = async (
+    fileID: number,
+    bodyVersion: number,
+) => {
+    const db = await mlDB();
+    const tx = db.transaction("file-status", "readwrite");
+    const status = await tx.store.get(fileID);
+    if (status) await tx.store.put({ ...status, bodyVersion });
+    await tx.done;
+};
+
+export const markBodyIndexingFailed = async (fileID: number) => {
+    const db = await mlDB();
+    const tx = db.transaction("file-status", "readwrite");
+    const status = await tx.store.get(fileID);
+    if (status)
+        await tx.store.put({
+            ...status,
+            bodyFailureCount: (status.bodyFailureCount ?? 0) + 1,
+        });
+    await tx.done;
+};
+
 export const updateAssumingLocalFiles = async (
     localFileIDs: number[],
     localTrashFilesIDs: Set<number>,
 ) => {
     const db = await mlDB();
     const tx = db.transaction(
-        ["file-status", "face-index", "clip-index"],
+        ["file-status", "face-index", "clip-index", "body-index"],
         "readwrite",
     );
     const fdbFileIDs = await tx.objectStore("file-status").getAllKeys();
@@ -162,6 +203,7 @@ export const updateAssumingLocalFiles = async (
             ),
             removedFileIDs.map((id) => tx.objectStore("face-index").delete(id)),
             removedFileIDs.map((id) => tx.objectStore("clip-index").delete(id)),
+            removedFileIDs.map((id) => tx.objectStore("body-index").delete(id)),
             tx.done,
         ].flat(),
     );

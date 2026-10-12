@@ -205,11 +205,11 @@ export const SuggestionFaceList: React.FC<SuggestionFaceListProps> = ({
 }) => {
     return (
         <SuggestionFaceList_>
-            {faces.map(({ file, faceID }) => (
+            {faces.map(({ file, faceID, body }) => (
                 <SuggestionFace key={faceID}>
                     <FaceCropImageView
                         placeholderDimension={87}
-                        {...{ file, faceID }}
+                        {...{ file, faceID, body }}
                     />
                 </SuggestionFace>
             ))}
@@ -242,6 +242,7 @@ type FaceCropImageViewProps = PreviewableFace & {
 const FaceCropImageView: React.FC<FaceCropImageViewProps> = ({
     faceID,
     file,
+    body,
     placeholderDimension,
 }) => {
     const [url, setURL] = useState<string | undefined>();
@@ -257,7 +258,13 @@ const FaceCropImageView: React.FC<FaceCropImageViewProps> = ({
     }, [faceID, file]);
 
     return url ? (
-        <img style={{ objectFit: "cover" }} src={url} />
+        <img
+            style={{
+                objectFit:
+                    body || faceID.startsWith("body:") ? "contain" : "cover",
+            }}
+            src={url}
+        />
     ) : (
         <Skeleton
             variant="circular"

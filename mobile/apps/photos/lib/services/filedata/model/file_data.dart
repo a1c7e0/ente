@@ -1,4 +1,5 @@
 import "package:ente_pure_utils/ente_pure_utils.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/face.dart";
 
 const _faceKey = 'face';
@@ -24,6 +25,7 @@ enum DataType {
 }
 
 class FileDataEntity {
+  int? updatedAt;
   final int fileID;
   final Map<String, dynamic> remoteRawData;
   final DataType type;
@@ -32,6 +34,9 @@ class FileDataEntity {
 
   void validate() {
     if (type == DataType.mlData) {
+      // Independent body metadata can exist without legacy subtypes.
+      // Readers already treat absent subtypes as not indexed.
+      if (bodyIndex != null) return;
       if (remoteRawData[_faceKey] == null) {
         throw Exception('Face embedding is null');
       }
@@ -64,6 +69,22 @@ class FileDataEntity {
   void putClip(RemoteClipEmbedding clipEmbedding) {
     assert(type == DataType.mlData, 'Invalid type ${type.value}');
     remoteRawData[_clipKey] = clipEmbedding.toJson();
+  }
+
+  BodyIndex? get bodyIndex => BodyIndex.tryParse(remoteRawData["body"]);
+
+  bool get hasUnsupportedBody {
+    final raw = remoteRawData["body"];
+    if (raw is! Map<String, dynamic> || raw["version"] is! num) return false;
+    final version = raw["version"] as num;
+    return version > bodyMlVersion ||
+        (version == bodyMlVersion &&
+            raw["model"] is String &&
+            raw["model"] != bodyModel);
+  }
+
+  void putBody(BodyIndex index) {
+    remoteRawData["body"] = index.toJson();
   }
 
   RemoteFaceEmbedding? get faceEmbedding => remoteRawData[_faceKey] != null

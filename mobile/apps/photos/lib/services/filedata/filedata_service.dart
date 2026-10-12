@@ -1,10 +1,13 @@
 import "dart:async";
+import "dart:convert";
 
 import "package:computer/computer.dart";
 import "package:flutter/foundation.dart" show Uint8List;
 import "package:logging/logging.dart";
+import "package:photos/core/event_bus.dart";
 import "package:photos/db/files_db.dart";
 import "package:photos/db/ml/db.dart";
+import "package:photos/events/people_changed_event.dart";
 import "package:photos/gateways/files/file_data_gateway.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/service_locator.dart";
@@ -49,6 +52,7 @@ class FileDataService {
         type: data.type.toJson(),
         encryptedData: encryptionResult.encData,
         decryptionHeader: encryptionResult.header,
+        lastUpdatedAt: data.updatedAt ?? 0,
       );
     } catch (e, s) {
       _logger.severe("putDerivedMetaData failed", e, s);
@@ -153,12 +157,81 @@ class FileDataService {
         hasMoreData = result.isNotEmpty;
         previewIds = await MLDataDB.instance.getFileIDsVidPreview();
       } while (hasMoreData);
+      try {
+        if (await _syncBodyData()) Bus.instance.fire(PeopleChangedEvent());
+      } catch (e, s) {
+        _logger.warning(
+          "Body data sync failed; retaining the original file-data sync",
+          e,
+          s,
+        );
+      }
     } catch (e) {
       if (previewIds.isEmpty) {
         previewIds = await MLDataDB.instance.getFileIDsVidPreview();
       }
       _logger.severe("Failed to syncDiff", e);
       rethrow;
+    }
+  }
+
+  Future<bool> _syncBodyData() async {
+    if (!hasGrantedMLConsent || !localSettings.remoteFetchEnabled) return false;
+    bool changed = false;
+    while (true) {
+      final since = _prefs.getInt("body.fd.lastSyncTime") ?? 0;
+      final response = await _gateway.getStatusDiff(lastUpdatedAt: since);
+      final diff = (response["diff"] ?? []) as List;
+      if (diff.isEmpty) return changed;
+      final existing = await MLDataDB.instance.bodyIndexes();
+      final statuses = diff
+          .map((d) => FDStatus.fromJson(d as Map<String, dynamic>))
+          .toList();
+      final ids = statuses
+          .where(
+            (s) =>
+                s.type == DataType.mlData.value &&
+                !s.isDeleted &&
+                existing.containsKey(s.fileID),
+          )
+          .map((s) => s.fileID)
+          .toList();
+      for (int start = 0; start < ids.length; start += 200) {
+        final end = start + 200 < ids.length ? start + 200 : ids.length;
+        final fetched = await getFilesData(ids.sublist(start, end).toSet());
+        if (fetched.fetchErrorFileIDs.isNotEmpty) {
+          throw StateError("Body metadata fetch failed");
+        }
+        for (final entity in fetched.data.values) {
+          final raw = entity.remoteRawData["body"];
+          if (raw is Map<String, dynamic> &&
+              (entity.bodyIndex != null || entity.hasUnsupportedBody)) {
+            final encoded = jsonEncode(raw);
+            if (existing[entity.fileID] != encoded) {
+              await MLDataDB.instance.putBodyIndex(
+                entity.fileID,
+                encoded,
+                (raw["version"] as num).toInt(),
+              );
+              changed = true;
+            }
+          } else if (raw == null) {
+            await MLDataDB.instance.deleteBodyIndexes([entity.fileID]);
+            changed = true;
+          }
+        }
+      }
+      final deleted = statuses
+          .where((s) => s.isDeleted && s.type == DataType.mlData.value)
+          .map((s) => s.fileID)
+          .toList();
+      await MLDataDB.instance.deleteBodyIndexes(deleted);
+      if (deleted.any(existing.containsKey)) changed = true;
+      final until = statuses.fold<int>(
+        since,
+        (last, s) => s.updatedAt > last ? s.updatedAt : last,
+      );
+      await _prefs.setInt("body.fd.lastSyncTime", until);
     }
   }
 }
@@ -181,7 +254,7 @@ Future<Map<int, FileDataEntity>> _decryptFileDataComputer(
         input.data.fileID,
         input.data.type,
         decodedJson,
-      );
+      )..updatedAt = input.data.updatedAt;
     } on FormatException catch (e, s) {
       logger.warning(
         "Ignoring unparseable ML data for file id ${input.data.fileID}",

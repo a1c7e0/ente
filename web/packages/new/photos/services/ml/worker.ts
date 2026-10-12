@@ -4,6 +4,7 @@ import { assertionFailed } from "ente-base/assert";
 import { isNamedError, namedError } from "ente-base/error";
 import { lowercaseExtension } from "ente-base/file-name";
 import { isHTTP4xxError, isHTTPErrorWithStatus } from "ente-base/http";
+import { getKV, setKV } from "ente-base/kv";
 import log from "ente-base/log";
 import { logUnhandledErrorsAndRejectionsInWorker } from "ente-base/log-web";
 import type {
@@ -12,6 +13,7 @@ import type {
     MLWorkerAnalyzeImageResult,
 } from "ente-base/types/ipc";
 import { isNetworkDownloadError } from "ente-gallery/services/download";
+import { syncUpdatedFileDataFileIDs } from "ente-gallery/services/file-data";
 import type { ProcessableUploadItem } from "ente-gallery/services/upload";
 import { fileLogID, type EnteFile } from "ente-media/file";
 import { fileFileName } from "ente-media/file-metadata";
@@ -26,6 +28,12 @@ import {
     type IndexableImageSource,
 } from "./blob";
 import {
+    BodyIndex,
+    bodyIndexingVersion,
+    bodyModel,
+    linkBodyFaces,
+} from "./body";
+import {
     _clipMatches,
     clearCachedCLIPIndexes,
     clipIndexingVersion,
@@ -39,8 +47,13 @@ import {
 } from "./cluster";
 import { saveFaceCropBlobs } from "./crop";
 import {
+    deleteBodyIndex,
+    markBodyIndexingFailed,
     markIndexingFailed,
     readNextIndexableFileIDs,
+    recordBodyVersion,
+    saveBodyIndex,
+    savedBodyIndexes,
     savedFaceIndexes,
     saveIndexes,
     updateAssumingLocalFiles,
@@ -330,6 +343,52 @@ const syncWithLocalFilesAndGetFilesToIndex = async (
     const collectionFiles = await savedCollectionFiles();
     const fileByID = new Map(collectionFiles.map((f) => [f.id, f]));
 
+    const cursor = Number((await getKV("bodyFileDataSyncTime")) ?? 0);
+    const bodyFileIDs = new Set(
+        (await savedBodyIndexes()).map((i) => i.fileID),
+    );
+    await syncUpdatedFileDataFileIDs(
+        "mldata",
+        cursor,
+        async ({ fileIDs, lastUpdatedAt }) => {
+            const ids = [...fileIDs].filter(
+                (id) => fileByID.has(id) && bodyFileIDs.has(id),
+            );
+            for (let start = 0; start < ids.length; start += 200) {
+                const batch = new Map(
+                    ids
+                        .slice(start, start + 200)
+                        .map((id) => [id, fileByID.get(id)!]),
+                );
+                for (const [fileID, remote] of await fetchMLData(batch)) {
+                    const parsed = BodyIndex.safeParse(remote.raw.body);
+                    if (parsed.success)
+                        await saveBodyIndex({ ...parsed.data, fileID });
+                    else if (!remote.raw.body) {
+                        await deleteBodyIndex(fileID);
+                        await recordBodyVersion(fileID, 0);
+                    } else if (typeof remote.raw.body == "object") {
+                        const rawBody = remote.raw.body as {
+                            version?: number;
+                            model?: string;
+                        };
+                        const version = rawBody.version ?? 0;
+                        if (
+                            version > bodyIndexingVersion ||
+                            (version >= bodyIndexingVersion &&
+                                typeof rawBody.model == "string" &&
+                                rawBody.model != bodyModel)
+                        ) {
+                            await deleteBodyIndex(fileID);
+                            await recordBodyVersion(fileID, version);
+                        }
+                    }
+                }
+            }
+            await setKV("bodyFileDataSyncTime", lastUpdatedAt);
+        },
+    );
+
     await updateAssumingLocalFiles(
         Array.from(fileByID.keys()),
         await savedTrashItemFileIDs(),
@@ -368,11 +427,30 @@ const index = async (
         existingCLIPIndex = { embedding };
     }
 
+    const parsedBody = BodyIndex.safeParse(remoteMLData?.raw.body);
+    const existingBodyIndex = parsedBody.success ? parsedBody.data : undefined;
+    const bodyRaw = remoteMLData?.raw.body as
+        { version?: number; model?: string } | undefined;
+    const unsupportedBody =
+        typeof bodyRaw?.version == "number" &&
+        (bodyRaw.version > bodyIndexingVersion ||
+            (bodyRaw.version >= bodyIndexingVersion &&
+                typeof bodyRaw.model == "string" &&
+                bodyRaw.model != bodyModel));
+    // Keep the original remote hydration path: no body-only backfill.
     if (existingFaceIndex && existingCLIPIndex) {
         await saveIndexes(
             { fileID, ...existingFaceIndex },
             { fileID, ...existingCLIPIndex },
         );
+        if (unsupportedBody) await deleteBodyIndex(fileID);
+        if (existingBodyIndex)
+            await saveBodyIndex({ ...existingBodyIndex, fileID });
+        if (existingBodyIndex || unsupportedBody)
+            await recordBodyVersion(
+                fileID,
+                bodyRaw?.version ?? bodyIndexingVersion,
+            );
         return;
     }
 
@@ -450,9 +528,49 @@ const index = async (
               };
 
     // Preserve fields added by newer clients when upserting known indexes.
+    let bodyIndex = existingBodyIndex;
+    if (!bodyIndex && !unsupportedBody) {
+        try {
+            const analyzeBodies = (bytes: Uint8Array) => {
+                const task = _analyzeImageQueue.then(() =>
+                    electron.analyzeBodies(fileID, bytes),
+                );
+                _analyzeImageQueue = task.catch(() => undefined);
+                return task;
+            };
+            let nativeBody;
+            try {
+                nativeBody = await analyzeBodies(source.bytes);
+            } catch (e) {
+                const ext = lowercaseExtension(fileFileName(file));
+                if (!isMLDecodeError(e) || !ext || !needsJPEGConversion(ext))
+                    throw e;
+                nativeBody = await analyzeBodies(
+                    await renderableImageBytes(file, source),
+                );
+            }
+            bodyIndex = BodyIndex.parse({
+                version: bodyIndexingVersion,
+                model: bodyModel,
+                client: clientIdentifier,
+                width: nativeBody.width,
+                height: nativeBody.height,
+                detections: linkBodyFaces(
+                    nativeBody.detections,
+                    faceIndex.faces,
+                ),
+            });
+        } catch (e) {
+            log.warn(
+                `Body indexing failed for ${f}; retaining face and CLIP indexes`,
+                e,
+            );
+        }
+    }
     const existingRawMLData = remoteMLData?.raw ?? {};
     const rawMLData: RawRemoteMLData = {
         ...existingRawMLData,
+        ...(bodyIndex ? { body: bodyIndex } : {}),
         ...(existingFaceIndex ? {} : { face: remoteFaceIndex }),
         ...(existingCLIPIndex ? {} : { clip: remoteCLIPIndex }),
     };
@@ -473,6 +591,15 @@ const index = async (
     }
 
     await saveIndexes({ fileID, ...faceIndex }, { fileID, ...clipIndex });
+    if (bodyIndex) {
+        await saveBodyIndex({ ...bodyIndex, fileID });
+        await recordBodyVersion(fileID, bodyIndex.version);
+    } else if (unsupportedBody) {
+        await deleteBodyIndex(fileID);
+        await recordBodyVersion(fileID, bodyRaw.version ?? bodyIndexingVersion);
+    } else {
+        await markBodyIndexingFailed(fileID);
+    }
 
     // Crop caching is best-effort and must not invalidate a saved index.
     if (runFaces && result.faceCrops) {
