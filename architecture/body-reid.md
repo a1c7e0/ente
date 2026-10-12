@@ -26,6 +26,11 @@ the exported file's size and SHA-256 before use. The earlier unshipped x0.25
 prototype uses a distinct model identifier; its vectors are not mixed with AIN.
 Face/CLIP indexing versions stay unchanged.
 
+The fork's `Release (body recognition models)` workflow can reproduce and publish
+the resource release. It checks the exact catalog checksum before publication;
+rerunning it verifies existing assets instead of replacing them. It is restricted
+to this fork, publishes a prerelease, and does not change the latest app release.
+
 ## Remote data
 
 Body results are an independent top-level `body` subtype of the existing
