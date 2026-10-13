@@ -135,8 +135,6 @@ export const savedCLIPIndexes = async () => {
 };
 
 export const savedBodyIndexes = async () => (await mlDB()).getAll("body-index");
-export const savedBodyIndexCount = async () =>
-    (await mlDB()).count("body-index");
 export const deleteBodyIndex = async (fileID: number) =>
     (await mlDB()).delete("body-index", fileID);
 export const saveBodyIndex = async (index: LocalBodyIndex) =>

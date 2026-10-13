@@ -190,14 +190,10 @@ Regenerate exported bindings with `cargo codegen frb photos` and
 `cargo codegen napi`. Generated bindings are excluded from Git by the project's
 existing code-generation workflow.
 
-## Face model metadata and ML settings
+## Face model metadata
 
 New face results record `model: mobilefacenet-portable-v1` and
 `detectorModel: yolov5s-face-v1` separately from the existing indexing `version`.
 Missing model identifiers on old metadata default to the current models when
 read. This is a read default, not a migration/backfill of every remote object.
 The original face model assets and face indexing version remain unchanged.
-Both ML settings screens show the count of valid body-indexed photos using their
-existing menu/card components. This count is separate from the original overall
-indexing progress, so missing body results on historical photos do not create
-pending work or reduce that progress.

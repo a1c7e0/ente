@@ -25,12 +25,7 @@ import { deleteUserEntity } from "../user-entity/remote";
 import { bodyGroupWithID, splitBodyGroup } from "./body-review";
 import type { ClusterFacesReason, FaceCluster } from "./cluster";
 import { regenerateFaceCrops } from "./crop";
-import {
-    clearMLDB,
-    savedBodyIndexCount,
-    savedFaceIndex,
-    savedIndexCounts,
-} from "./db";
+import { clearMLDB, savedFaceIndex, savedIndexCounts } from "./db";
 import { fileIDFromFaceID } from "./face";
 import {
     _applyPersonSuggestionUpdates,
@@ -221,7 +216,6 @@ export type MLStatus =
           phaseFailed?: boolean;
           nSyncedFiles: number;
           nTotalFiles: number;
-          nBodyIndexedFiles?: number;
       };
 
 export const mlStatusSubscribe = (onChange: () => void): (() => void) => {
@@ -255,7 +249,6 @@ const getMLStatus = async (): Promise<MLStatus> => {
     if (!_state.isMLEnabled) return { phase: "disabled" };
 
     const w = await worker();
-    const bodyIndexedCount = await savedBodyIndexCount();
 
     const clusteringProgress = await w.clusteringProgress;
     if (clusteringProgress) {
@@ -263,7 +256,6 @@ const getMLStatus = async (): Promise<MLStatus> => {
             phase: "clustering",
             nSyncedFiles: clusteringProgress.completed,
             nTotalFiles: clusteringProgress.total,
-            nBodyIndexedFiles: bodyIndexedCount,
         };
     }
 
@@ -288,7 +280,6 @@ const getMLStatus = async (): Promise<MLStatus> => {
         phaseFailed,
         nSyncedFiles: indexedCount,
         nTotalFiles: indexableCount + indexedCount,
-        nBodyIndexedFiles: bodyIndexedCount,
     };
 };
 

@@ -71,15 +71,6 @@ class RustMLDataDB implements IMLDataDB<int> {
       (await store).bodyIndexes(minimumVersion: minimumVersion);
 
   @override
-  Future<Set<int>> bodyIndexedFileIds({
-    required int version,
-    required String model,
-  }) async => (await (await store).bodyIndexedFileIds(
-    version: version,
-    model: model,
-  )).inner.toSet();
-
-  @override
   Future<void> putBodyIndex(int fileID, String data, int version) async =>
       (await store).putBodyIndex(fileId: fileID, data: data, version: version);
 

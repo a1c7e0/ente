@@ -50,13 +50,7 @@ class IndexStatus {
   final int indexedItems, pendingItems;
   final bool? hasWifiEnabled;
 
-  final int bodyIndexedItems;
-  IndexStatus(
-    this.indexedItems,
-    this.pendingItems, [
-    this.hasWifiEnabled,
-    this.bodyIndexedItems = 0,
-  ]);
+  IndexStatus(this.indexedItems, this.pendingItems, [this.hasWifiEnabled]);
 }
 
 class FileMLInstruction {
@@ -175,12 +169,7 @@ Future<IndexStatus> getIndexStatus() async {
     _logger.info(
       "IndexStatus: $indexed indexed of $total total (localGallery: $localGallery, petActive: $petActive, hasWifiEnabled: $hasWifiEnabled)",
     );
-    final bodyIDs = await mlDataDB.bodyIndexedFileIds(
-      version: bodyMlVersion,
-      model: bodyModel,
-    );
-    final bodyIndexed = bodyIDs.intersection(seenKeys).length;
-    return IndexStatus(indexed, total - indexed, hasWifiEnabled, bodyIndexed);
+    return IndexStatus(indexed, total - indexed, hasWifiEnabled);
   } catch (e, s) {
     _logger.severe('Error getting ML status', e, s);
     rethrow;

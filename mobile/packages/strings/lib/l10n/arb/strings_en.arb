@@ -5104,6 +5104,5 @@
     }
   },
   "notEnoughStorageTitle": "Not enough storage",
-  "notEnoughStorageBody": "You do not have enough free space on Ente to add new photos. Free up space or upgrade to keep adding.",
-  "bodyRecognition": "Body recognition"
+  "notEnoughStorageBody": "You do not have enough free space on Ente to add new photos. Free up space or upgrade to keep adding."
 }

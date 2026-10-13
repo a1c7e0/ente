@@ -2710,6 +2710,5 @@
   "youveNoDuplicateCodesThatCanBeCleared": "您没有可清除的重复代码",
   "youveNoDuplicateFilesThatCanBeCleared": "您没有任何可以清除的重复文件",
   "youveNoFilesInThisAlbumThatCanBeDeleted": "您在此相册中没有可以删除的文件",
-  "zoomOutToSeePhotos": "缩小以查看照片",
-  "bodyRecognition": "身体识别"
+  "zoomOutToSeePhotos": "缩小以查看照片"
 }

@@ -185,14 +185,6 @@ impl MlStore {
         Ok(self.inner.db().body_indexes(minimum_version)?)
     }
 
-    pub fn body_indexed_file_ids(
-        &self,
-        version: i64,
-        model: String,
-    ) -> Result<Vec<i64>, MlDbError> {
-        Ok(self.inner.db().body_indexed_file_ids(version, &model)?)
-    }
-
     pub fn put_body_index(
         &self,
         file_id: i64,

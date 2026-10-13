@@ -301,23 +301,6 @@ const ManageML: React.FC<ManageMLProps> = ({ mlStatus, onDisableML }) => {
                     </Typography>
                 }
             />
-            <RowCard
-                title={
-                    <Typography
-                        component="span"
-                        sx={{ color: "text.faint", pl: 1 }}
-                    >
-                        {t("body_recognition")}
-                    </Typography>
-                }
-                endIcon={
-                    <Typography sx={{ textAlign: "right" }}>
-                        {t("photos_count", {
-                            count: mlStatus.nBodyIndexedFiles ?? 0,
-                        })}
-                    </Typography>
-                }
-            />
         </Stack>
     );
 };

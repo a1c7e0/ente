@@ -1151,7 +1151,6 @@
     "auto_lock_30_minutes": "",
     "wrong_unlock_code_one": "",
     "wrong_unlock_code_other": "",
-    "body_recognition": "身体识别",
     "mixed_grouping": "混合分组",
     "separate_selected": "隔离所选照片"
 }
