@@ -8,7 +8,7 @@ import "package:photos/core/event_bus.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/person.dart";
-import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
+import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
 import "package:photos/services/search_service.dart";
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/viewer/file/no_thumbnail_widget.dart";
@@ -92,10 +92,10 @@ class _PersonClustersPageState extends State<PersonClustersPage> {
                                     ? GestureDetector(
                                         onTap: () async {
                                           try {
-                                            await PersonService.instance
-                                                .removeClusterToPerson(
-                                                  personID:
-                                                      widget.person.remoteID,
+                                            await ClusterFeedbackService
+                                                .instance
+                                                .removeGroupFromPerson(
+                                                  person: widget.person,
                                                   clusterID: clusterID,
                                                 );
                                             _logger.info(
@@ -244,8 +244,8 @@ class __ClusterWrapperForGirdState extends State<_ClusterWrapperForGird> {
       _isRemoving = true;
     });
     try {
-      await PersonService.instance.removeClusterToPerson(
-        personID: widget.person.remoteID,
+      await ClusterFeedbackService.instance.removeGroupFromPerson(
+        person: widget.person,
         clusterID: widget.clusterID,
       );
       _logger.info(

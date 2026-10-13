@@ -13,6 +13,17 @@ class BodyDetection {
   final String? linkedFaceID;
   final Map<String, dynamic> decisions;
   final Map<String, dynamic> raw;
+  String? get groupID => raw["groupID"] as String?;
+
+  void bindReviewGroup(String reference) {
+    final id = reference.startsWith("body-group:")
+        ? reference
+        : "body-group:${reference.substring(5)}";
+    if (groupID != null && groupID != id) {
+      throw StateError("Body grouping changed; reload the review");
+    }
+    raw["groupID"] = id;
+  }
 
   BodyDetection({
     required this.bodyID,
@@ -30,11 +41,14 @@ class BodyDetection {
         .toList();
     final box = FaceBox.fromJson(json["box"] as Map<String, dynamic>);
     final bodyID = json["bodyID"] as String;
+    final groupID = json["groupID"];
     final score = (json["score"] as num).toDouble();
     final decisions = Map<String, dynamic>.from(
       json["decisions"] as Map? ?? {},
     );
     if (!bodyID.startsWith("body:") ||
+        (groupID != null &&
+            (groupID is! String || !groupID.startsWith("body-group:"))) ||
         !score.isFinite ||
         score < 0 ||
         score > 1 ||
@@ -119,7 +133,7 @@ class BodyIndex {
     ...raw,
     "version": version,
     "model": bodyModel,
-    "client": "ente",
+    "client": raw["client"] is String ? raw["client"] : "ente",
     "width": width,
     "height": height,
     "detections": detections.map((d) => d.toJson()).toList(),
@@ -151,6 +165,67 @@ class BodyMatch {
     this.margin,
   );
   bool get automatic => similarity >= 0.74 && margin >= 0.05;
+}
+
+bool isBodyReference(String id) =>
+    id.startsWith("body:") || id.startsWith("body-group:");
+
+class BodyGroup {
+  final String id;
+  final String personID;
+  final List<BodyMatch> matches;
+  BodyGroup(this.id, this.personID, this.matches);
+}
+
+List<BodyGroup> groupBodyMatches(
+  List<BodyMatch> matches,
+  Map<int, int> times, {
+  double threshold = 0.8,
+}) {
+  final groups = <BodyGroup>[];
+  final ordered = matches.toList()
+    ..sort((a, b) => a.detection.bodyID.compareTo(b.detection.bodyID));
+  for (final match in ordered) {
+    final partition = match.detection.groupID;
+    BodyGroup? target;
+    for (final group in groups) {
+      if (group.personID != match.personID ||
+          (partition != null
+              ? group.id != partition
+              : group.matches.first.detection.groupID != null)) {
+        continue;
+      }
+      if (group.matches.every(
+        (m) =>
+            m.fileID != match.fileID &&
+            (partition != null ||
+                ((times[m.fileID] ?? 0) > 0 &&
+                    (times[match.fileID] ?? 0) > 0 &&
+                    (times[m.fileID]! - times[match.fileID]!).abs() <=
+                        const Duration(hours: 3).inMicroseconds &&
+                    bodyCosine(
+                          m.detection.embedding,
+                          match.detection.embedding,
+                        ) >=
+                        threshold)),
+      )) {
+        target = group;
+        break;
+      }
+    }
+    if (target != null) {
+      target.matches.add(match);
+    } else {
+      groups.add(
+        BodyGroup(
+          partition ?? "body-group:${match.detection.bodyID.substring(5)}",
+          match.personID,
+          [match],
+        ),
+      );
+    }
+  }
+  return groups;
 }
 
 List<BodyMatch> matchBodyDetections(

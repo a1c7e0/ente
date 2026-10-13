@@ -11,6 +11,7 @@ import "package:photos/db/ml/db.dart";
 import "package:photos/db/offline_files_db.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/file/file_type.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/box.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/module/download/file.dart";
@@ -283,7 +284,7 @@ Future<Uint8List?> precomputeClusterFaceCrop(
   required bool useFullFile,
 }) async {
   try {
-    if (clusterID.startsWith("body:")) {
+    if (isBodyReference(clusterID)) {
       final crops = await BodyRecognitionService.instance.crop(file, clusterID);
       return crops[file.uploadedFileID];
     }

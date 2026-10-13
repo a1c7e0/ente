@@ -1,20 +1,21 @@
 import "dart:convert";
 import "dart:typed_data";
 
-import "package:dio/dio.dart";
 import "package:logging/logging.dart";
+import "package:photos/db/files_db.dart";
 import "package:photos/db/ml/base.dart";
 import "package:photos/db/ml/db.dart";
+import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/box.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
-import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/face_thumbnail_generator.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
+import "package:photos/services/search_service.dart";
 import "package:photos/src/rust/api/ml_indexing_api.dart" as rust;
 import "package:photos/utils/ml_util.dart";
 
@@ -82,38 +83,17 @@ class BodyRecognitionService {
     BodyIndex generated,
   ) async {
     final fileID = file.uploadedFileID!;
-    for (int attempt = 0; attempt < 3; attempt++) {
-      final response = await fileDataService.getFilesData({fileID});
-      if (response.fetchErrorFileIDs.contains(fileID)) {
-        throw StateError("Body metadata fetch failed");
-      }
-      final entity =
-          response.data[fileID] ??
-          (FileDataEntity.empty(fileID, DataType.mlData)..updatedAt = 0);
-      final existing = entity.bodyIndex;
-      if (existing != null) {
-        // Another device may have indexed or reviewed this photo meanwhile.
-        await store(db, fileID, existing);
-        return;
-      }
-      if (entity.hasUnsupportedBody) {
-        final raw = entity.remoteRawData["body"] as Map<String, dynamic>;
-        await db.putBodyIndex(
-          fileID,
-          jsonEncode(raw),
-          (raw["version"] as num).toInt(),
-        );
-        return;
-      }
-      entity.putBody(generated);
-      try {
-        await fileDataService.putFileData(file, entity);
-        await store(db, fileID, generated);
-        return;
-      } on DioException catch (e) {
-        if (e.response?.statusCode != 409 || attempt == 2) rethrow;
-      }
-    }
+    final entity = await fileDataService.updateFileData(file, (latest) {
+      if (latest.bodyIndex != null || latest.hasUnsupportedBody) return false;
+      latest.putBody(generated);
+      return true;
+    });
+    final raw = entity.remoteRawData["body"] as Map<String, dynamic>;
+    await db.putBodyIndex(
+      fileID,
+      jsonEncode(raw),
+      (raw["version"] as num).toInt(),
+    );
   }
 
   Future<Map<int, BodyIndex>> indexes() async {
@@ -180,36 +160,246 @@ class BodyRecognitionService {
     return _matches;
   }
 
+  Future<List<BodyGroup>> groups(List<EnteFile> files) async =>
+      groupBodyMatches(await matches(files), {
+        for (final f in files)
+          if (f.uploadedFileID != null && f.creationTime != null)
+            f.uploadedFileID!: f.creationTime!,
+      });
+
+  Future<List<(int, BodyDetection)>> groupMembers(String reference) async {
+    final all = await indexes();
+    final saved = <(int, BodyDetection)>[
+      for (final entry in all.entries)
+        for (final body in entry.value.detections)
+          if (body.groupID == reference || body.bodyID == reference)
+            (entry.key, body),
+    ];
+    if (saved.isNotEmpty) return saved;
+    final candidates = await groups(
+      await SearchService.instance.getAllFilesForSearch(),
+    );
+    final group = candidates.firstWhere((g) => g.id == reference);
+    return [for (final m in group.matches) (m.fileID, m.detection)];
+  }
+
+  Future<void> _updateBody(
+    EnteFile file,
+    String bodyID,
+    void Function(BodyDetection) update,
+  ) async {
+    final entity = await fileDataService.updateFileData(file, (latest) {
+      final index = latest.bodyIndex;
+      if (index == null) throw StateError("Body index is unavailable");
+      update(index.detections.firstWhere((d) => d.bodyID == bodyID));
+      latest.putBody(index);
+      return true;
+    });
+    await store(MLDataDB.instance, file.uploadedFileID!, entity.bodyIndex!);
+  }
+
+  Future<void> acceptGroup(PersonEntity person, String reference) async {
+    final members = await groupMembers(reference);
+    final files = await FilesDB.instance.getFileIDToFileFromIDs(
+      members.map((m) => m.$1).toList(),
+    );
+    // Check all current partitions before introducing any manual photo tags.
+    final ids = files.keys.toList();
+    for (int start = 0; start < ids.length; start += 200) {
+      final end = start + 200 < ids.length ? start + 200 : ids.length;
+      final batch = ids.sublist(start, end).toSet();
+      final response = await fileDataService.getFilesData(batch);
+      if (response.fetchErrorFileIDs.isNotEmpty) {
+        throw StateError("Metadata fetch failed");
+      }
+      for (final member in members.where((m) => batch.contains(m.$1))) {
+        final index = response.data[member.$1]?.bodyIndex;
+        if (index == null) throw StateError("Body index is unavailable");
+        index.detections
+            .firstWhere((d) => d.bodyID == member.$2.bodyID)
+            .bindReviewGroup(reference);
+      }
+    }
+    final assigned = await PersonService.instance.addManualFileAssignments(
+      personID: person.remoteID,
+      fileIDs: files.keys.toSet(),
+    );
+    for (final member in members) {
+      if (!files.containsKey(member.$1)) continue;
+      await _updateBody(files[member.$1]!, member.$2.bodyID, (body) {
+        body.bindReviewGroup(reference);
+        final previous = body.decisions[person.remoteID];
+        body.decisions[person.remoteID] = {
+          "status": "accepted",
+          "addedManual":
+              assigned.addedFileIds.contains(member.$1) ||
+              (previous is Map && previous["addedManual"] == true),
+        };
+      });
+    }
+  }
+
+  Future<void> rejectGroup(String personID, String reference) async {
+    for (final member in await groupMembers(reference)) {
+      final file = await FilesDB.instance.getAnyUploadedFile(member.$1);
+      if (file == null) continue;
+      await _updateBody(file, member.$2.bodyID, (body) {
+        body.bindReviewGroup(reference);
+        body.decisions[personID] = {"status": "rejected"};
+      });
+    }
+  }
+
+  Future<void> undoGroup(PersonEntity person, String reference) async {
+    final members = await groupMembers(reference);
+    final introduced = <int>{};
+    for (final member in members) {
+      final decision = member.$2.decisions[person.remoteID];
+      if (decision is Map && decision["addedManual"] == true) {
+        introduced.add(member.$1);
+      }
+    }
+    final current = await PersonService.instance.getPerson(person.remoteID);
+    if (current != null && introduced.isNotEmpty) {
+      await PersonService.instance.updatePerson(
+        current.copyWith(
+          data: current.data.copyWith(
+            manuallyAssigned: current.data.manuallyAssigned
+                .where((id) => !introduced.contains(id))
+                .toList(),
+          ),
+        ),
+      );
+    }
+    for (final member in members) {
+      final file = await FilesDB.instance.getAnyUploadedFile(member.$1);
+      if (file != null) {
+        await _updateBody(
+          file,
+          member.$2.bodyID,
+          (body) => body.decisions.remove(person.remoteID),
+        );
+      }
+    }
+  }
+
+  Future<Map<String, List<EnteFile>>> splitGroup(
+    String reference,
+    Set<int> selected,
+  ) async {
+    final members = await groupMembers(reference);
+    final candidates = await groups(
+      await SearchService.instance.getAllFilesForSearch(),
+    );
+    String? suggestedPerson;
+    for (final group in candidates) {
+      if (group.id == reference) suggestedPerson = group.personID;
+    }
+    final introduced = <String, Set<int>>{};
+    for (final member in members.where((m) => selected.contains(m.$1))) {
+      for (final decision in member.$2.decisions.entries) {
+        if (decision.value is Map &&
+            decision.value["status"] == "accepted" &&
+            decision.value["addedManual"] == true) {
+          introduced.putIfAbsent(decision.key, () => {}).add(member.$1);
+        }
+      }
+    }
+    for (final entry in introduced.entries) {
+      final person = await PersonService.instance.getPerson(entry.key);
+      if (person != null) {
+        await PersonService.instance.updatePerson(
+          person.copyWith(
+            data: person.data.copyWith(
+              manuallyAssigned: person.data.manuallyAssigned
+                  .where((id) => !entry.value.contains(id))
+                  .toList(),
+            ),
+          ),
+        );
+      }
+    }
+    final selectedID = "body-group:${newClusterID()}";
+    final result = <String, List<EnteFile>>{};
+    for (final member in members) {
+      final id = selected.contains(member.$1) ? selectedID : reference;
+      final file = await FilesDB.instance.getAnyUploadedFile(member.$1);
+      if (file == null) continue;
+      await _updateBody(file, member.$2.bodyID, (body) {
+        body.raw["groupID"] = id;
+        if (selected.contains(member.$1)) {
+          for (final entry in body.decisions.entries.toList()) {
+            if (entry.value is Map && entry.value["status"] == "accepted") {
+              body.decisions[entry.key] = {"status": "rejected"};
+            }
+          }
+          if (suggestedPerson != null) {
+            body.decisions[suggestedPerson] = {"status": "rejected"};
+          }
+        }
+      });
+      result.putIfAbsent(id, () => []).add(file);
+    }
+    return result;
+  }
+
+  Future<Map<String, List<EnteFile>>> breakUpGroup(String reference) async {
+    final members = await groupMembers(reference);
+    final files = await FilesDB.instance.getFileIDToFileFromIDs(
+      members.map((m) => m.$1).toList(),
+    );
+    final matches = [
+      for (final m in members)
+        BodyMatch(
+          m.$1,
+          BodyDetection.fromJson(
+            Map<String, dynamic>.from(m.$2.toJson())..remove("groupID"),
+          ),
+          "split",
+          1,
+          1,
+        ),
+    ];
+    final partitions = groupBodyMatches(
+      matches,
+      {for (final f in files.values) f.uploadedFileID!: f.creationTime ?? 0},
+      threshold: 0.9,
+    )..sort((a, b) => b.matches.length.compareTo(a.matches.length));
+    final result = <String, List<EnteFile>>{};
+    for (int i = 0; i < partitions.length; i++) {
+      final id = i == 0 ? reference : "body-group:${newClusterID()}";
+      for (final match in partitions[i].matches) {
+        final file = files[match.fileID]!;
+        await _updateBody(
+          file,
+          match.detection.bodyID,
+          (body) => body.raw["groupID"] = id,
+        );
+        result.putIfAbsent(id, () => []).add(file);
+      }
+    }
+    return result;
+  }
+
   Future<void> updateDecision(
     EnteFile file,
     String bodyID,
     String personID,
     Map<String, dynamic>? decision,
   ) async {
-    for (int attempt = 0; attempt < 3; attempt++) {
-      final response = await fileDataService.getFilesData({
-        file.uploadedFileID!,
-      });
-      final entity = response.data[file.uploadedFileID!];
-      final index = entity?.bodyIndex;
-      if (entity == null || index == null) {
-        throw StateError("Body index is unavailable");
-      }
+    final entity = await fileDataService.updateFileData(file, (latest) {
+      final index = latest.bodyIndex;
+      if (index == null) throw StateError("Body index is unavailable");
       final body = index.detections.firstWhere((d) => d.bodyID == bodyID);
       if (decision == null) {
         body.decisions.remove(personID);
       } else {
         body.decisions[personID] = decision;
       }
-      entity.putBody(index);
-      try {
-        await fileDataService.putFileData(file, entity);
-        await store(MLDataDB.instance, file.uploadedFileID!, index);
-        return;
-      } on DioException catch (e) {
-        if (e.response?.statusCode != 409 || attempt == 2) rethrow;
-      }
-    }
+      latest.putBody(index);
+      return true;
+    });
+    await store(MLDataDB.instance, file.uploadedFileID!, entity.bodyIndex!);
   }
 
   Future<void> accept(PersonEntity person, EnteFile file, String bodyID) async {
@@ -251,7 +441,8 @@ class BodyRecognitionService {
   Future<Map<int, Uint8List?>> crop(EnteFile file, String bodyID) async {
     final index = (await indexes())[file.uploadedFileID];
     if (index == null) return {};
-    final body = index.detections.firstWhere((d) => d.bodyID == bodyID);
+    final members = await groupMembers(bodyID);
+    final body = members.firstWhere((m) => m.$1 == file.uploadedFileID).$2;
     final crops = await FaceThumbnailGenerator.instance.generateFaceThumbnails(
       await getImagePathForML(file),
       [body.box],

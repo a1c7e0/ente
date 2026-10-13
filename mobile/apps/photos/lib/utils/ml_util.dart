@@ -50,7 +50,13 @@ class IndexStatus {
   final int indexedItems, pendingItems;
   final bool? hasWifiEnabled;
 
-  IndexStatus(this.indexedItems, this.pendingItems, [this.hasWifiEnabled]);
+  final int bodyIndexedItems;
+  IndexStatus(
+    this.indexedItems,
+    this.pendingItems, [
+    this.hasWifiEnabled,
+    this.bodyIndexedItems = 0,
+  ]);
 }
 
 class FileMLInstruction {
@@ -169,7 +175,12 @@ Future<IndexStatus> getIndexStatus() async {
     _logger.info(
       "IndexStatus: $indexed indexed of $total total (localGallery: $localGallery, petActive: $petActive, hasWifiEnabled: $hasWifiEnabled)",
     );
-    return IndexStatus(indexed, total - indexed, hasWifiEnabled);
+    final bodyIDs = await mlDataDB.bodyIndexedFileIds(
+      version: bodyMlVersion,
+      model: bodyModel,
+    );
+    final bodyIndexed = bodyIDs.intersection(seenKeys).length;
+    return IndexStatus(indexed, total - indexed, hasWifiEnabled, bodyIndexed);
   } catch (e, s) {
     _logger.severe('Error getting ML status', e, s);
     rethrow;
@@ -634,7 +645,7 @@ Future<List<FileMLInstruction>> hydrateRemoteMLDataForInstructions(
     if (existingInstruction == null) {
       continue;
     }
-    final facesFromRemoteEmbedding = _getFacesFromRemoteEmbedding(fileMl);
+    final facesFromRemoteEmbedding = facesFromRemoteMLData(fileMl);
     // A non-null result is compatible remote data, even when no face was found.
     if (facesFromRemoteEmbedding != null) {
       faces.addAll(facesFromRemoteEmbedding);
@@ -686,7 +697,7 @@ Future<List<FileMLInstruction>> hydrateRemoteMLDataForInstructions(
       .toList();
 }
 
-List<Face>? _getFacesFromRemoteEmbedding(FileDataEntity fileMl) {
+List<Face>? facesFromRemoteMLData(FileDataEntity fileMl) {
   final RemoteFaceEmbedding? remoteFaceEmbedding = fileMl.faceEmbedding;
   if (_shouldDiscardRemoteEmbedding(fileMl)) {
     return null;
@@ -709,7 +720,9 @@ List<Face>? _getFacesFromRemoteEmbedding(FileDataEntity fileMl) {
 bool _shouldDiscardRemoteEmbedding(FileDataEntity fileML) {
   final fileID = fileML.fileID;
   final RemoteFaceEmbedding? faceEmbedding = fileML.faceEmbedding;
-  if (faceEmbedding == null || faceEmbedding.version < faceMlVersion) {
+  if (faceEmbedding == null ||
+      faceEmbedding.version < faceMlVersion ||
+      faceEmbedding.model != faceEmbeddingModel) {
     _logger.info(
       "Discarding remote embedding for fileID $fileID "
       "because version is ${faceEmbedding?.version} and we need $faceMlVersion",

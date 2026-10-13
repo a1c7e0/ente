@@ -580,6 +580,24 @@ class MLStatusWidgetState extends State<MLStatusWidget> {
                       style: TextStyles.mini.copyWith(color: colors.textLight),
                     ),
                   ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: MenuComponent(
+                      title: context.strings.bodyRecognition,
+                      leading: const HugeIcon(
+                        icon: HugeIcons.strokeRoundedUserMultiple,
+                        size: IconSizes.small,
+                      ),
+                      trailing: Text(
+                        context.strings.photosCount(
+                          count: snapshot.data!.bodyIndexedItems,
+                        ),
+                        style: TextStyles.mini.copyWith(
+                          color: colors.textLight,
+                        ),
+                      ),
+                    ),
+                  ),
                   if (MLService.instance.showClusteringIsHappening)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),

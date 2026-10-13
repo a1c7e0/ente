@@ -2,6 +2,7 @@ import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import { Skeleton, styled, Typography } from "@mui/material";
 import { useIsSmallWidth } from "ente-base/components/utils/hooks";
 import type { EnteFile } from "ente-media/file";
+import { fileFileName } from "ente-media/file-metadata";
 import { faceCrop, type AnnotatedFaceID } from "ente-new/photos/services/ml";
 import type {
     Person,
@@ -198,15 +199,46 @@ const AddPersonAvatar = styled("div")(
 
 export interface SuggestionFaceListProps {
     faces: PreviewableFace[];
+    selected?: Set<string>;
+    onToggle?: (faceID: string) => void;
 }
 
 export const SuggestionFaceList: React.FC<SuggestionFaceListProps> = ({
     faces,
+    selected,
+    onToggle,
 }) => {
     return (
-        <SuggestionFaceList_>
+        <SuggestionFaceList_
+            style={{ flexWrap: onToggle ? "wrap" : undefined }}
+        >
             {faces.map(({ file, faceID, body }) => (
-                <SuggestionFace key={faceID}>
+                <SuggestionFace
+                    key={faceID}
+                    role={onToggle ? "button" : undefined}
+                    tabIndex={onToggle ? 0 : undefined}
+                    aria-label={onToggle ? fileFileName(file) : undefined}
+                    aria-pressed={onToggle ? selected?.has(faceID) : undefined}
+                    onClick={onToggle ? () => onToggle(faceID) : undefined}
+                    onKeyDown={
+                        onToggle
+                            ? (event) => {
+                                  if (
+                                      event.key == "Enter" ||
+                                      event.key == " "
+                                  ) {
+                                      event.preventDefault();
+                                      onToggle(faceID);
+                                  }
+                              }
+                            : undefined
+                    }
+                    style={{
+                        outline: selected?.has(faceID)
+                            ? "2px solid currentColor"
+                            : undefined,
+                    }}
+                >
                     <FaceCropImageView
                         placeholderDimension={87}
                         {...{ file, faceID, body }}

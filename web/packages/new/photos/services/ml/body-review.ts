@@ -1,15 +1,15 @@
-import { isHTTPErrorWithStatus } from "ente-base/http";
 import type { EnteFile } from "ente-media/file";
 import { computeNormalCollectionFilesFromSaved } from "../file";
 import { savedCGroups } from "../user-entity";
 import {
     BodyIndex,
+    groupBodyMatches,
     matchBodies,
     type BodyDetection,
     type LocalBodyIndex,
 } from "./body";
 import { saveBodyIndex, savedBodyIndexes, savedFaceClusters } from "./db";
-import { fetchMLData, putMLData } from "./ml-data";
+import { updateMLData } from "./ml-data";
 import type { CGroupPerson, PreviewableCluster } from "./people";
 
 let matchCacheKey: string | undefined;
@@ -54,28 +54,33 @@ export const currentBodyMatches = async (files: EnteFile[]) => {
     return matchCache;
 };
 
+export const currentBodyGroups = async (files: EnteFile[]) =>
+    groupBodyMatches(await currentBodyMatches(files), files);
+
 export const bodySuggestionsForPerson = async (
     person: CGroupPerson,
 ): Promise<PreviewableCluster[]> => {
     const files = await computeNormalCollectionFilesFromSaved();
     const fileByID = new Map(files.map((f) => [f.id, f]));
     const manual = new Set(person.cgroup.data.manuallyAssigned);
-    return (await currentBodyMatches(files))
-        .filter((m) => m.personID == person.id && !manual.has(m.fileID))
-        .flatMap((m) => {
-            const file = fileByID.get(m.fileID);
-            return file
+    return (await currentBodyGroups(files))
+        .filter((g) => g.personID == person.id)
+        .flatMap((g) => {
+            const members = g.matches.filter(
+                (m) => !manual.has(m.fileID) && fileByID.has(m.fileID),
+            );
+            return members.length
                 ? [
                       {
-                          id: m.detection.bodyID,
-                          faces: [m.detection.bodyID],
-                          previewFaces: [
-                              {
+                          id: g.id,
+                          faces: members.map((m) => m.detection.bodyID),
+                          previewFaces: members
+                              .slice(0, 5)
+                              .map((m) => ({
                                   faceID: m.detection.bodyID,
-                                  file,
+                                  file: fileByID.get(m.fileID)!,
                                   body: m.detection,
-                              },
-                          ],
+                              })),
                       },
                   ]
                 : [];
@@ -83,24 +88,90 @@ export const bodySuggestionsForPerson = async (
 };
 
 export const bodyChoicesForPerson = async (person: CGroupPerson) => {
-    const fileByID = new Map(
+    const files = await computeNormalCollectionFilesFromSaved();
+    const fileByID = new Map(files.map((f) => [f.id, f]));
+    const manual = new Set(person.cgroup.data.manuallyAssigned);
+    const grouped = new Map<
+        string,
+        PreviewableCluster & { assigned: boolean }
+    >();
+    for (const index of await savedBodyIndexes()) {
+        const file = fileByID.get(index.fileID);
+        if (!file || !BodyIndex.safeParse(index).success) continue;
+        for (const body of index.detections) {
+            const decision = body.decisions[person.id];
+            if (!decision) continue;
+            const id = body.groupID ?? `body-group:${body.bodyID.substring(5)}`;
+            const assigned =
+                decision.status == "accepted" && manual.has(index.fileID);
+            const group = grouped.get(id) ?? {
+                id,
+                faces: [],
+                previewFaces: [],
+                assigned: true,
+            };
+            group.faces.push(body.bodyID);
+            if (group.previewFaces.length < 5)
+                group.previewFaces.push({ faceID: body.bodyID, file, body });
+            group.assigned &&= assigned;
+            grouped.set(id, group);
+        }
+    }
+    return [...grouped.values()];
+};
+
+export const bodyGroupWithID = async (reference: string) => {
+    if (reference.startsWith("body:")) return [await bodyWithID(reference)];
+    const saved = (await savedBodyIndexes())
+        .filter((i) => BodyIndex.safeParse(i).success)
+        .flatMap((index) =>
+            index.detections
+                .filter((d) => d.groupID == reference)
+                .map((detection) => ({
+                    fileID: index.fileID,
+                    index,
+                    detection,
+                })),
+        );
+    if (saved.length) return saved;
+    const group = (
+        await currentBodyGroups(await computeNormalCollectionFilesFromSaved())
+    ).find((g) => g.id == reference);
+    if (!group) throw new Error(`Missing body group ${reference}`);
+    return Promise.all(
+        group.matches.map((m) => bodyWithID(m.detection.bodyID)),
+    );
+};
+
+export const splitBodyGroup = async (
+    reference: string,
+    selected: Set<string>,
+) => {
+    const members = await bodyGroupWithID(reference);
+    if (
+        !selected.size ||
+        members.every((m) => selected.has(m.detection.bodyID))
+    )
+        throw new Error("Select a proper subset of the body group");
+    const newID = `body-group:${crypto.randomUUID()}`;
+    const files = new Map(
         (await computeNormalCollectionFilesFromSaved()).map((f) => [f.id, f]),
     );
-    const manual = new Set(person.cgroup.data.manuallyAssigned);
-    return (await savedBodyIndexes()).flatMap((index) => {
-        const file = fileByID.get(index.fileID);
-        if (!file) return [];
-        return index.detections
-            .filter((d) => d.decisions[person.id])
-            .map((body) => ({
-                id: body.bodyID,
-                faces: [body.bodyID],
-                previewFaces: [{ faceID: body.bodyID, file, body }],
-                assigned:
-                    body.decisions[person.id]!.status == "accepted" &&
-                    manual.has(index.fileID),
-            }));
-    });
+    for (const member of members) {
+        const file = files.get(member.fileID);
+        if (!file) throw new Error("Missing body photo");
+        const raw = await updateMLData(file, (latest) => {
+            const index = BodyIndex.parse(latest.body);
+            const body = index.detections.find(
+                (d) => d.bodyID == member.detection.bodyID,
+            );
+            if (!body) throw new Error("Missing body detection");
+            body.groupID = selected.has(body.bodyID) ? newID : reference;
+            latest.body = index;
+        });
+        await saveBodyIndex({ ...BodyIndex.parse(raw.body), fileID: file.id });
+    }
+    return newID;
 };
 
 export const bodyWithID = async (
@@ -122,17 +193,22 @@ export const updateBodyDecision = async (
     bodyID: string,
     personID: string,
     decision: BodyDetection["decisions"][string] | undefined,
+    groupID?: string,
 ) => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-        const remote = (await fetchMLData(new Map([[file.id, file]]))).get(
-            file.id,
-        );
-        const parsed = BodyIndex.safeParse(remote?.raw.body);
-        if (!remote || !parsed.success)
-            throw new Error("Body index is unavailable");
+    const raw = await updateMLData(file, (latest) => {
+        const parsed = BodyIndex.safeParse(latest.body);
+        if (!parsed.success) throw new Error("Body index is unavailable");
         const index = parsed.data;
         const detection = index.detections.find((d) => d.bodyID == bodyID);
         if (!detection) throw new Error("Body detection is unavailable");
+        if (groupID) {
+            const id = groupID.startsWith("body-group:")
+                ? groupID
+                : `body-group:${groupID.substring(5)}`;
+            if (detection.groupID && detection.groupID != id)
+                throw new Error("Body grouping changed; reload the review");
+            detection.groupID = id;
+        }
         if (decision) detection.decisions[personID] = decision;
         else
             detection.decisions = Object.fromEntries(
@@ -140,16 +216,7 @@ export const updateBodyDecision = async (
                     ([id]) => id != personID,
                 ),
             );
-        try {
-            await putMLData(
-                file,
-                { ...remote.raw, body: index },
-                remote.updatedAt ?? 0,
-            );
-            await saveBodyIndex({ ...index, fileID: file.id });
-            return;
-        } catch (e) {
-            if (!isHTTPErrorWithStatus(e, 409) || attempt == 2) throw e;
-        }
-    }
+        latest.body = index;
+    });
+    await saveBodyIndex({ ...BodyIndex.parse(raw.body), fileID: file.id });
 };

@@ -3411,5 +3411,6 @@
   "youveNoDuplicateFilesThatCanBeCleared": "您沒有任何可清除的重複檔案",
   "youveNoFilesInThisAlbumThatCanBeDeleted": "此相簿中沒有您可以刪除的檔案",
   "zoomOutToSeePhotos": "縮小以查看照片",
-  "grantAccess": "授予存取權限"
+  "grantAccess": "授予存取權限",
+  "bodyRecognition": "身體辨識"
 }

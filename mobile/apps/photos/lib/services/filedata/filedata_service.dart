@@ -2,6 +2,7 @@ import "dart:async";
 import "dart:convert";
 
 import "package:computer/computer.dart";
+import "package:dio/dio.dart";
 import "package:flutter/foundation.dart" show Uint8List;
 import "package:logging/logging.dart";
 import "package:photos/core/event_bus.dart";
@@ -10,12 +11,15 @@ import "package:photos/db/ml/db.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/gateways/files/file_data_gateway.dart";
 import "package:photos/models/file/file.dart";
+import "package:photos/models/ml/clip.dart";
+import "package:photos/models/ml/ml_versions.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/model/enc_file_data.dart";
 import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/filedata/model/response.dart";
 import "package:photos/utils/file_key.dart";
 import "package:photos/utils/gzip.dart";
+import "package:photos/utils/ml_util.dart" show facesFromRemoteMLData;
 import "package:shared_preferences/shared_preferences.dart";
 
 const _maxMLDataBytes = 4 * 1024 * 1024;
@@ -58,6 +62,33 @@ class FileDataService {
       _logger.severe("putDerivedMetaData failed", e, s);
       rethrow;
     }
+  }
+
+  // Reapply a subtype update to the newest encrypted metadata after a conflict.
+  // A false result adopts existing data without replacing it.
+  Future<FileDataEntity> updateFileData(
+    EnteFile file,
+    FutureOr<bool> Function(FileDataEntity) update, {
+    DataType type = DataType.mlData,
+  }) async {
+    final fileID = file.uploadedFileID!;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      final response = await getFilesData({fileID}, type: type);
+      if (response.fetchErrorFileIDs.contains(fileID)) {
+        throw StateError("Metadata fetch failed");
+      }
+      final entity =
+          response.data[fileID] ??
+          (FileDataEntity.empty(fileID, type)..updatedAt = 0);
+      if (!await update(entity)) return entity;
+      try {
+        await putFileData(file, entity);
+        return entity;
+      } on DioException catch (e) {
+        if (e.response?.statusCode != 409 || attempt == 2) rethrow;
+      }
+    }
+    throw StateError("Metadata update failed");
   }
 
   Future<FileDataResponse> getFilesData(
@@ -137,6 +168,7 @@ class FileDataService {
       _logger.fine("Skipping file data sync in local gallery mode");
       return;
     }
+    final previousStatusCursor = _prefs.getInt("fd.lastSyncTime") ?? 0;
     try {
       bool hasMoreData = false;
       do {
@@ -158,10 +190,12 @@ class FileDataService {
         previewIds = await MLDataDB.instance.getFileIDsVidPreview();
       } while (hasMoreData);
       try {
-        if (await _syncBodyData()) Bus.instance.fire(PeopleChangedEvent());
+        if (await _syncMLData(initialCursor: previousStatusCursor)) {
+          Bus.instance.fire(PeopleChangedEvent());
+        }
       } catch (e, s) {
         _logger.warning(
-          "Body data sync failed; retaining the original file-data sync",
+          "ML data sync failed; retaining the original file-data sync",
           e,
           s,
         );
@@ -175,15 +209,17 @@ class FileDataService {
     }
   }
 
-  Future<bool> _syncBodyData() async {
+  Future<bool> _syncMLData({required int initialCursor}) async {
     if (!hasGrantedMLConsent || !localSettings.remoteFetchEnabled) return false;
     bool changed = false;
     while (true) {
-      final since = _prefs.getInt("body.fd.lastSyncTime") ?? 0;
+      final since = _prefs.getInt("ml.fd.lastSyncTime") ?? initialCursor;
       final response = await _gateway.getStatusDiff(lastUpdatedAt: since);
       final diff = (response["diff"] ?? []) as List;
       if (diff.isEmpty) return changed;
       final existing = await MLDataDB.instance.bodyIndexes();
+      final faces = await MLDataDB.instance.faceIndexedFileIds();
+      final clips = await MLDataDB.instance.clipIndexedFileWithVersion();
       final statuses = diff
           .map((d) => FDStatus.fromJson(d as Map<String, dynamic>))
           .toList();
@@ -192,7 +228,9 @@ class FileDataService {
             (s) =>
                 s.type == DataType.mlData.value &&
                 !s.isDeleted &&
-                existing.containsKey(s.fileID),
+                (existing.containsKey(s.fileID) ||
+                    faces.containsKey(s.fileID) ||
+                    clips.containsKey(s.fileID)),
           )
           .map((s) => s.fileID)
           .toList();
@@ -200,9 +238,35 @@ class FileDataService {
         final end = start + 200 < ids.length ? start + 200 : ids.length;
         final fetched = await getFilesData(ids.sublist(start, end).toSet());
         if (fetched.fetchErrorFileIDs.isNotEmpty) {
-          throw StateError("Body metadata fetch failed");
+          throw StateError("ML metadata fetch failed");
         }
         for (final entity in fetched.data.values) {
+          final remoteFaces = facesFromRemoteMLData(entity);
+          if (remoteFaces != null && faces.containsKey(entity.fileID)) {
+            final local =
+                await MLDataDB.instance.getFacesForGivenFileID(entity.fileID) ??
+                [];
+            final localJSON = local.map((f) => jsonEncode(f.toJson())).toList()
+              ..sort();
+            final remoteJSON =
+                remoteFaces.map((f) => jsonEncode(f.toJson())).toList()..sort();
+            if (jsonEncode(localJSON) != jsonEncode(remoteJSON)) {
+              await MLDataDB.instance.deleteFaceIndexForFiles([entity.fileID]);
+              await MLDataDB.instance.bulkInsertFaces(remoteFaces);
+              changed = true;
+            }
+          }
+          final remoteClip = entity.getClipEmbeddingIfCompatible(clipMlVersion);
+          if (remoteClip != null && clips.containsKey(entity.fileID)) {
+            await MLDataDB.instance.putClip([
+              ClipEmbedding(
+                fileID: entity.fileID,
+                embedding: remoteClip.embedding,
+                version: remoteClip.version,
+              ),
+            ]);
+          }
+
           final raw = entity.remoteRawData["body"];
           if (raw is Map<String, dynamic> &&
               (entity.bodyIndex != null || entity.hasUnsupportedBody)) {
@@ -215,7 +279,7 @@ class FileDataService {
               );
               changed = true;
             }
-          } else if (raw == null) {
+          } else if (raw == null && existing.containsKey(entity.fileID)) {
             await MLDataDB.instance.deleteBodyIndexes([entity.fileID]);
             changed = true;
           }
@@ -231,7 +295,7 @@ class FileDataService {
         since,
         (last, s) => s.updatedAt > last ? s.updatedAt : last,
       );
-      await _prefs.setInt("body.fd.lastSyncTime", until);
+      await _prefs.setInt("ml.fd.lastSyncTime", until);
     }
   }
 }

@@ -4,6 +4,23 @@ import "package:photos/models/ml/body.dart";
 
 void main() {
   test(
+    "legacy face metadata defaults to current models and preserves extensions",
+    () {
+      final face = RemoteFaceEmbedding.fromJson({
+        "faces": [],
+        "version": 1,
+        "client": "legacy",
+        "width": 100,
+        "height": 100,
+        "future": 7,
+      });
+      expect(face.model, faceEmbeddingModel);
+      expect(face.detectorModel, faceDetectionModel);
+      expect(face.toJson()["future"], 7);
+      expect(face.toJson()["model"], faceEmbeddingModel);
+    },
+  );
+  test(
     "independent body metadata remains readable through optional legacy subtypes",
     () {
       final entity = FileDataEntity.empty(1, DataType.mlData)

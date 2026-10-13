@@ -79,8 +79,11 @@ void main() {
   );
 
   test("invalid body data is isolated and empty results are valid", () {
-    final raw = BodyIndex(1000, 1000, []).toJson()..["extension"] = true;
+    final raw = BodyIndex(1000, 1000, []).toJson()
+      ..["extension"] = true
+      ..["client"] = "desktop";
     expect(BodyIndex.tryParse(raw)?.toJson()["extension"], isTrue);
+    expect(BodyIndex.tryParse(raw)?.toJson()["client"], "desktop");
     expect(
       BodyIndex.tryParse({...raw, "model": "another-vector-space"}),
       isNull,
@@ -112,4 +115,55 @@ void main() {
       isEmpty,
     );
   });
+  test("similar bodies group without joining a chain or human partitions", () {
+    BodyMatch item(int id, double cosine, {String? group}) => BodyMatch(
+      id,
+      BodyDetection.fromJson({
+        ...body("body:${id}_1", cosine: cosine).toJson(),
+        if (group != null) "groupID": group,
+      }),
+      "person-a",
+      0.8,
+      0.1,
+    );
+    final times = {1: time, 2: time, 3: time};
+    expect(
+      groupBodyMatches([
+        item(3, 1),
+        item(1, 1),
+        item(2, 1),
+      ], times).single.matches.length,
+      3,
+    );
+    expect(
+      groupBodyMatches([
+        item(1, 1),
+        item(2, 0.85),
+        item(3, 0.55),
+      ], times).map((g) => g.matches.length),
+      [2, 1],
+    );
+    expect(
+      groupBodyMatches([
+        item(1, 1, group: "body-group:a"),
+        item(2, 1, group: "body-group:b"),
+      ], times).length,
+      2,
+    );
+  });
+
+  test(
+    "a stale review cannot bind an already split body back to the old group",
+    () {
+      final detection = BodyDetection.fromJson({
+        ...body("body:1_1").toJson(),
+        "groupID": "body-group:isolated",
+      });
+      expect(
+        () => detection.bindReviewGroup("body-group:original"),
+        throwsStateError,
+      );
+      expect(detection.groupID, "body-group:isolated");
+    },
+  );
 }

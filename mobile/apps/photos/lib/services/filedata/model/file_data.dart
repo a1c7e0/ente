@@ -3,6 +3,8 @@ import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/face.dart";
 
 const _faceKey = 'face';
+const faceEmbeddingModel = 'mobilefacenet-portable-v1';
+const faceDetectionModel = 'yolov5s-face-v1';
 const _clipKey = 'clip';
 
 enum DataType {
@@ -110,6 +112,9 @@ class RemoteFaceEmbedding {
   final String client;
   final int height;
   final int width;
+  final String model;
+  final String detectorModel;
+  final Map<String, dynamic> raw;
 
   // Bits are defined in ml_versions.dart; absent on the wire means legacy 0.
   final int flags;
@@ -121,9 +126,15 @@ class RemoteFaceEmbedding {
     required this.height,
     required this.width,
     this.flags = 0,
+    this.model = faceEmbeddingModel,
+    this.detectorModel = faceDetectionModel,
+    this.raw = const {},
   });
 
   Map<String, dynamic> toJson() => {
+    ...raw,
+    'model': model,
+    'detectorModel': detectorModel,
     'faces': faces.map((x) => x.toJson()).toList(),
     'version': version,
     'client': client,
@@ -142,6 +153,9 @@ class RemoteFaceEmbedding {
       height: json['height'] as int,
       width: json['width'] as int,
       flags: (json['flags'] as int?) ?? 0,
+      model: json['model'] as String? ?? faceEmbeddingModel,
+      detectorModel: json['detectorModel'] as String? ?? faceDetectionModel,
+      raw: json,
     );
   }
 }

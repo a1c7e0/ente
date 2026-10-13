@@ -1242,6 +1242,24 @@ class SearchService {
         }
       }
     }
+    final person = await PersonService.instance.getPerson(personID);
+    if (person != null) {
+      final fileByID = {for (final file in allFiles) file.uploadedFileID: file};
+      for (final entry
+          in (await BodyRecognitionService.instance.indexes()).entries) {
+        final file = fileByID[entry.key];
+        if (file == null || !person.data.manuallyAssigned.contains(entry.key)) {
+          continue;
+        }
+        for (final body in entry.value.detections) {
+          final decision = body.decisions[personID];
+          if (decision is! Map || decision["status"] != "accepted") continue;
+          final id = body.groupID ?? "body-group:${body.bodyID.substring(5)}";
+          final files = clusterIDToFiles.putIfAbsent(id, () => []);
+          if (!files.any((f) => f.uploadedFileID == entry.key)) files.add(file);
+        }
+      }
+    }
     _logger.info('done getClusterFilesForPersonID $personID');
     return clusterIDToFiles;
   }

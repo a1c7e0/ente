@@ -15,9 +15,11 @@ import "package:photos/events/people_changed_event.dart";
 import 'package:photos/events/subscription_purchased_event.dart';
 import "package:photos/models/file/file.dart";
 import 'package:photos/models/gallery_type.dart';
+import "package:photos/models/ml/body.dart";
 import 'package:photos/models/selected_files.dart';
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
 import 'package:photos/services/collections_service.dart';
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/theme/ente_theme.dart";
@@ -185,14 +187,15 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
           ),
         ),
       if (!isLocalGalleryMode && hasAccount) ...[
-        EntePopupMenuOption(
-          value: ClusterPopupAction.ignore,
-          label: context.strings.ignorePerson,
-          leadingWidget: const HugeIcon(
-            icon: HugeIcons.strokeRoundedUserBlock01,
-            size: IconSizes.small,
+        if (!isBodyReference(widget.clusterID))
+          EntePopupMenuOption(
+            value: ClusterPopupAction.ignore,
+            label: context.strings.ignorePerson,
+            leadingWidget: const HugeIcon(
+              icon: HugeIcons.strokeRoundedUserBlock01,
+              size: IconSizes.small,
+            ),
           ),
-        ),
         EntePopupMenuOption(
           value: ClusterPopupAction.breakupCluster,
           label: context.strings.mixedGrouping,
@@ -201,7 +204,7 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
             size: IconSizes.small,
           ),
         ),
-        if (kDebugMode)
+        if (kDebugMode && !isBodyReference(widget.clusterID))
           const EntePopupMenuOption(
             value: ClusterPopupAction.breakupClusterDebug,
             label: "Debug mixed grouping",
@@ -261,6 +264,30 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
   }
 
   Future<void> _breakUpCluster(BuildContext context) async {
+    if (isBodyReference(widget.clusterID)) {
+      Map<String, List<EnteFile>>? groups;
+      await showChoiceDialog(
+        context,
+        title: context.strings.doesGroupContainMultiplePeople,
+        body: context.strings.automaticallyAnalyzeAndSplitGrouping,
+        firstButtonLabel: context.strings.confirm,
+        firstButtonOnTap: () async {
+          groups = await BodyRecognitionService.instance.breakUpGroup(
+            widget.clusterID,
+          );
+        },
+      );
+      if (groups == null || !context.mounted) return;
+      Bus.instance.fire(PeopleChangedEvent());
+      Navigator.of(context).pop();
+      if (!context.mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ClusterBreakupPage(groups!, context.strings.analysis),
+        ),
+      );
+      return;
+    }
     bool userConfirmed = false;
     List<EnteFile> biggestClusterFiles = [];
     String biggestClusterID = '';

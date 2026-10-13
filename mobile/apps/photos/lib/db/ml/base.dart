@@ -9,6 +9,10 @@ import "package:photos/services/machine_learning/face_ml/face_clustering/face_db
 
 abstract class IMLDataDB<T> {
   Future<Map<int, String>> bodyIndexes({int minimumVersion = 1});
+  Future<Set<int>> bodyIndexedFileIds({
+    required int version,
+    required String model,
+  });
   Future<void> putBodyIndex(int fileID, String data, int version);
   Future<void> deleteBodyIndexes(List<int> fileIDs);
   Future<void> bulkInsertFaces(List<Face> faces);

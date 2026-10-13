@@ -11,6 +11,7 @@ import "package:photos/core/event_bus.dart";
 import "package:photos/db/ml/db.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/person.dart";
 import 'package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart';
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
@@ -349,7 +350,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
       final clusterID = currentSuggestion.clusterIDToMerge;
       final someFile = currentSuggestion.filesInCluster.first;
 
-      final result = clusterID.startsWith("body:")
+      final result = isBodyReference(clusterID)
           ? await showMergeClustersToPersonPage(context)
           : await Navigator.of(context).push(
               MaterialPageRoute(
@@ -574,7 +575,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   Future<void> _undoLastFeedback() async {
     if (pastUserFeedback.isNotEmpty) {
       final SuggestionUserFeedback lastFeedback = pastUserFeedback.removeLast();
-      if (lastFeedback.suggestion.clusterIDToMerge.startsWith("body:")) {
+      if (isBodyReference(lastFeedback.suggestion.clusterIDToMerge)) {
         await ClusterFeedbackService.instance.undoSuggestion(
           widget.person,
           lastFeedback.suggestion.clusterIDToMerge,
@@ -585,9 +586,9 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
           clusterID: lastFeedback.suggestion.clusterIDToMerge,
         );
       } else {
-        await mlDataDB.removeNotPersonFeedback(
-          personID: widget.person.remoteID,
-          clusterID: lastFeedback.suggestion.clusterIDToMerge,
+        await ClusterFeedbackService.instance.undoSuggestion(
+          widget.person,
+          lastFeedback.suggestion.clusterIDToMerge,
         );
       }
       _notifySuggestionReviewed();

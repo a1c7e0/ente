@@ -61,10 +61,12 @@ import {
     addCGroup,
     addClusterToCGroup,
     applyPersonSuggestionUpdates,
+    bodyGroupPreviews,
     deleteCGroup,
     ignoreCluster,
     pinCGroup,
     renameCGroup,
+    separateBodyGroup,
     suggestionsAndChoicesForPerson,
     unpinCGroup,
 } from "ente-new/photos/services/ml";
@@ -76,6 +78,7 @@ import type {
     PersonSuggestionsAndChoices,
     PersonSuggestionUpdates,
     PreviewableCluster,
+    PreviewableFace,
 } from "ente-new/photos/services/ml/people";
 import { t } from "i18next";
 import React, { useEffect, useReducer, useState } from "react";
@@ -644,6 +647,14 @@ const SuggestionsDialog: React.FC<SuggestionsDialogProps> = ({
         }
     };
 
+    const handleSplitGroup = async (
+        reference: string,
+        selected: Set<string>,
+    ) => {
+        await separateBodyGroup(person.cgroup, reference, selected);
+        resetPersonAndClose();
+    };
+
     return (
         <Dialog
             open={open}
@@ -709,6 +720,8 @@ const SuggestionsDialog: React.FC<SuggestionsDialogProps> = ({
                         items={state.choices}
                         updates={state.updates}
                         onUpdateItem={handleUpdateItem}
+                        onSplitGroup={handleSplitGroup}
+                        splitDisabled={hasUnsavedChanges}
                     />
                 ) : state.suggestions.length == 0 ? (
                     <CenteredFill>
@@ -723,6 +736,8 @@ const SuggestionsDialog: React.FC<SuggestionsDialogProps> = ({
                         items={state.suggestions}
                         updates={state.updates}
                         onUpdateItem={handleUpdateItem}
+                        onSplitGroup={handleSplitGroup}
+                        splitDisabled={hasUnsavedChanges}
                     />
                 )}
             </DialogContent>
@@ -752,12 +767,16 @@ interface SuggestionOrChoiceListProps {
     items: SCItem[];
     updates: PersonSuggestionUpdates;
     onUpdateItem: (item: SCItem, value: boolean | undefined) => void;
+    onSplitGroup: (reference: string, selected: Set<string>) => Promise<void>;
+    splitDisabled: boolean;
 }
 
 const SuggestionOrChoiceList: React.FC<SuggestionOrChoiceListProps> = ({
     items,
     updates,
     onUpdateItem,
+    onSplitGroup,
+    splitDisabled,
 }) => (
     <List dense sx={{ width: "100%" }}>
         {items.map((item) => (
@@ -771,6 +790,14 @@ const SuggestionOrChoiceList: React.FC<SuggestionOrChoiceListProps> = ({
                         {t("photos_count", { count: item.faces.length })}
                     </Typography>
                     <SuggestionFaceList faces={item.previewFaces} />
+                    {item.id.startsWith("body-group:") &&
+                        item.faces.length > 1 && (
+                            <BodyGroupSplitButton
+                                reference={item.id}
+                                disabled={splitDisabled}
+                                onSplit={onSplitGroup}
+                            />
+                        )}
                 </Stack>
                 {!item.fixed && (
                     <ToggleButtonGroup
@@ -790,6 +817,86 @@ const SuggestionOrChoiceList: React.FC<SuggestionOrChoiceListProps> = ({
         ))}
     </List>
 );
+
+const BodyGroupSplitButton: React.FC<{
+    reference: string;
+    disabled: boolean;
+    onSplit: (reference: string, selected: Set<string>) => Promise<void>;
+}> = ({ reference, disabled, onSplit }) => {
+    const [open, setOpen] = useState(false);
+    const [faces, setFaces] = useState<PreviewableFace[]>([]);
+    const [selected, setSelected] = useState(new Set<string>());
+    const [busy, setBusy] = useState(false);
+    const load = useWrapAsyncOperation(async () => {
+        setFaces(await bodyGroupPreviews(reference));
+        setSelected(new Set());
+        setOpen(true);
+    });
+    const separate = useWrapAsyncOperation(async () => {
+        setBusy(true);
+        try {
+            await onSplit(reference, selected);
+            setOpen(false);
+        } finally {
+            setBusy(false);
+        }
+    });
+    return (
+        <>
+            <FocusVisibleButton
+                color="secondary"
+                disabled={disabled}
+                onClick={load}
+            >
+                {t("mixed_grouping")}
+            </FocusVisibleButton>
+            <Dialog
+                open={open}
+                onClose={() => {
+                    if (!busy) setOpen(false);
+                }}
+                maxWidth="sm"
+                fullWidth
+            >
+                <DialogTitle>{t("mixed_grouping")}</DialogTitle>
+                <DialogContent>
+                    <SuggestionFaceList
+                        faces={faces}
+                        selected={selected}
+                        onToggle={(id) => {
+                            if (busy) return;
+                            setSelected((previous) => {
+                                const next = new Set(previous);
+                                if (next.has(id)) next.delete(id);
+                                else next.add(id);
+                                return next;
+                            });
+                        }}
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <FocusVisibleButton
+                        color="secondary"
+                        disabled={busy}
+                        onClick={() => setOpen(false)}
+                    >
+                        {t("cancel")}
+                    </FocusVisibleButton>
+                    <LoadingButton
+                        loading={busy}
+                        color="accent"
+                        onClick={separate}
+                        disabled={
+                            !selected.size || selected.size == faces.length
+                        }
+                    >
+                        {t("separate_selected")}
+                    </LoadingButton>
+                </DialogActions>
+            </Dialog>
+        </>
+    );
+};
 
 const itemValueFromUpdate = (
     item: SCItem,

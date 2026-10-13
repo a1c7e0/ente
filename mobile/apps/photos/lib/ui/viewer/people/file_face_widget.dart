@@ -6,6 +6,7 @@ import "package:logging/logging.dart";
 import "package:photos/db/ml/db.dart";
 import "package:photos/db/offline_files_db.dart";
 import 'package:photos/models/file/file.dart';
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
 import "package:photos/theme/ente_theme.dart";
@@ -86,7 +87,9 @@ class _FileFaceWidgetState extends State<FileFaceWidget> {
             children: [
               Image(
                 image: imageProvider,
-                fit: widget.clusterID?.startsWith("body:") == true
+                fit:
+                    widget.clusterID != null &&
+                        isBodyReference(widget.clusterID!)
                     ? BoxFit.contain
                     : BoxFit.cover,
               ),
@@ -113,7 +116,7 @@ class _FileFaceWidgetState extends State<FileFaceWidget> {
       return widget.faceCrop;
     }
     try {
-      if (widget.clusterID?.startsWith("body:") == true) {
+      if (widget.clusterID != null && isBodyReference(widget.clusterID!)) {
         return await precomputeClusterFaceCrop(
           widget.file,
           widget.clusterID!,

@@ -31,6 +31,7 @@ import {
     BodyIndex,
     bodyIndexingVersion,
     bodyModel,
+    isUnsupportedBodyIndex,
     linkBodyFaces,
 } from "./body";
 import {
@@ -58,14 +59,14 @@ import {
     saveIndexes,
     updateAssumingLocalFiles,
 } from "./db";
-import { faceIndexingVersion, type FaceIndex } from "./face";
-import { mlIndexFlagsForRustResult } from "./index-flags";
 import {
-    fetchMLData,
-    putMLData,
-    type RawRemoteMLData,
-    type RemoteMLData,
-} from "./ml-data";
+    faceDetectionModel,
+    faceEmbeddingModel,
+    faceIndexingVersion,
+    type FaceIndex,
+} from "./face";
+import { mlIndexFlagsForRustResult } from "./index-flags";
+import { fetchMLData, updateMLData, type RemoteMLData } from "./ml-data";
 import { _suggestionsAndChoicesForPerson, type CGroupPerson } from "./people";
 import type { CLIPMatches, MLWorkerDelegate } from "./worker-types";
 
@@ -343,16 +344,17 @@ const syncWithLocalFilesAndGetFilesToIndex = async (
     const collectionFiles = await savedCollectionFiles();
     const fileByID = new Map(collectionFiles.map((f) => [f.id, f]));
 
-    const cursor = Number((await getKV("bodyFileDataSyncTime")) ?? 0);
-    const bodyFileIDs = new Set(
-        (await savedBodyIndexes()).map((i) => i.fileID),
-    );
+    const cursor = Number((await getKV("mlFileDataSyncTime")) ?? 0);
+    const indexedFileIDs = new Set([
+        ...(await savedFaceIndexes()).map((i) => i.fileID),
+        ...(await savedBodyIndexes()).map((i) => i.fileID),
+    ]);
     await syncUpdatedFileDataFileIDs(
         "mldata",
         cursor,
         async ({ fileIDs, lastUpdatedAt }) => {
             const ids = [...fileIDs].filter(
-                (id) => fileByID.has(id) && bodyFileIDs.has(id),
+                (id) => fileByID.has(id) && indexedFileIDs.has(id),
             );
             for (let start = 0; start < ids.length; start += 200) {
                 const batch = new Map(
@@ -361,6 +363,20 @@ const syncWithLocalFilesAndGetFilesToIndex = async (
                         .map((id) => [id, fileByID.get(id)!]),
                 );
                 for (const [fileID, remote] of await fetchMLData(batch)) {
+                    const face = remote.parsed?.face;
+                    const clip = remote.parsed?.clip;
+                    if (
+                        face &&
+                        clip &&
+                        face.version >= faceIndexingVersion &&
+                        face.model == faceEmbeddingModel &&
+                        clip.version >= clipIndexingVersion
+                    ) {
+                        await saveIndexes(
+                            { ...face, fileID },
+                            { ...clip, fileID },
+                        );
+                    }
                     const parsed = BodyIndex.safeParse(remote.raw.body);
                     if (parsed.success)
                         await saveBodyIndex({ ...parsed.data, fileID });
@@ -385,7 +401,7 @@ const syncWithLocalFilesAndGetFilesToIndex = async (
                     }
                 }
             }
-            await setKV("bodyFileDataSyncTime", lastUpdatedAt);
+            await setKV("mlFileDataSyncTime", lastUpdatedAt);
         },
     );
 
@@ -412,7 +428,8 @@ const index = async (
     let existingFaceIndex: FaceIndex | undefined;
     if (
         existingRemoteFaceIndex &&
-        existingRemoteFaceIndex.version >= faceIndexingVersion
+        existingRemoteFaceIndex.version >= faceIndexingVersion &&
+        existingRemoteFaceIndex.model == faceEmbeddingModel
     ) {
         const { width, height, faces } = existingRemoteFaceIndex;
         existingFaceIndex = { width, height, faces };
@@ -429,14 +446,9 @@ const index = async (
 
     const parsedBody = BodyIndex.safeParse(remoteMLData?.raw.body);
     const existingBodyIndex = parsedBody.success ? parsedBody.data : undefined;
-    const bodyRaw = remoteMLData?.raw.body as
+    let bodyRaw = remoteMLData?.raw.body as
         { version?: number; model?: string } | undefined;
-    const unsupportedBody =
-        typeof bodyRaw?.version == "number" &&
-        (bodyRaw.version > bodyIndexingVersion ||
-            (bodyRaw.version >= bodyIndexingVersion &&
-                typeof bodyRaw.model == "string" &&
-                bodyRaw.model != bodyModel));
+    let unsupportedBody = isUnsupportedBodyIndex(bodyRaw);
     // Keep the original remote hydration path: no body-only backfill.
     if (existingFaceIndex && existingCLIPIndex) {
         await saveIndexes(
@@ -512,6 +524,8 @@ const index = async (
             ? existingRemoteFaceIndex
             : {
                   version: faceIndexingVersion,
+                  model: faceEmbeddingModel,
+                  detectorModel: faceDetectionModel,
                   client: clientIdentifier,
                   flags: indexFlags,
                   ...faceIndex,
@@ -567,26 +581,22 @@ const index = async (
             );
         }
     }
-    const existingRawMLData = remoteMLData?.raw ?? {};
-    const rawMLData: RawRemoteMLData = {
-        ...existingRawMLData,
-        ...(bodyIndex ? { body: bodyIndex } : {}),
-        ...(existingFaceIndex ? {} : { face: remoteFaceIndex }),
-        ...(existingCLIPIndex ? {} : { clip: remoteCLIPIndex }),
-    };
-
-    log.debug(() => ["Uploading ML data", rawMLData]);
-
     try {
-        const lastUpdatedAt = remoteMLData?.updatedAt ?? 0;
-        await putMLData(file, rawMLData, lastUpdatedAt);
+        const latest = await updateMLData(file, (raw) => {
+            if (runFaces) raw.face = remoteFaceIndex;
+            if (runClip) raw.clip = remoteCLIPIndex;
+            const publishedBody = BodyIndex.safeParse(raw.body);
+            if (publishedBody.success) bodyIndex = publishedBody.data;
+            else if (isUnsupportedBodyIndex(raw.body)) {
+                unsupportedBody = true;
+                bodyRaw = raw.body as { version?: number; model?: string };
+                bodyIndex = undefined;
+            } else if (bodyIndex && !unsupportedBody) raw.body = bodyIndex;
+        });
+        log.debug(() => ["Uploaded ML data", latest]);
     } catch (e) {
-        // 4xx is permanent except 409, which means the data already exists.
-        if (isHTTP4xxError(e)) {
-            if (!isHTTPErrorWithStatus(e, 409)) {
-                await markIndexingFailed(fileID);
-            }
-        }
+        if (isHTTP4xxError(e) && !isHTTPErrorWithStatus(e, 409))
+            await markIndexingFailed(fileID);
         throw e;
     }
 
@@ -596,7 +606,10 @@ const index = async (
         await recordBodyVersion(fileID, bodyIndex.version);
     } else if (unsupportedBody) {
         await deleteBodyIndex(fileID);
-        await recordBodyVersion(fileID, bodyRaw.version ?? bodyIndexingVersion);
+        await recordBodyVersion(
+            fileID,
+            bodyRaw?.version ?? bodyIndexingVersion,
+        );
     } else {
         await markBodyIndexingFailed(fileID);
     }

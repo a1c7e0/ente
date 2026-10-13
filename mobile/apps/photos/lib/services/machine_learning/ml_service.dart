@@ -1033,7 +1033,15 @@ class MLService {
         }
       }
       if (!isLocalGallery && (result.facesRan || result.clipRan)) {
-        await fileDataService.putFileData(instruction.file, dataEntity!);
+        await fileDataService.updateFileData(instruction.file, (latest) {
+          if (result.facesRan) latest.putFace(dataEntity!.faceEmbedding!);
+          if (result.clipRan) {
+            latest.putClip(
+              dataEntity!.getClipEmbeddingIfCompatible(clipMlVersion)!,
+            );
+          }
+          return true;
+        });
       }
       if (result.facesRan) await mlDataDB.bulkInsertFaces(faces);
       if (result.clipRan) {

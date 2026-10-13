@@ -3,6 +3,12 @@ use std::collections::HashMap;
 use crate::ml_db::{MlDb, Result};
 
 impl MlDb {
+    pub fn body_indexed_file_ids(&self, version: i64, model: &str) -> Result<Vec<i64>> {
+        self.read_column(
+            "SELECT file_id FROM body_index WHERE ml_version = ? AND CASE WHEN json_valid(data) THEN json_extract(data, '$.model') = ? AND json_type(data, '$.detections') = 'array' ELSE 0 END",
+            (version, model),
+        )
+    }
     pub fn body_indexes(&self, minimum_version: i64) -> Result<HashMap<i64, String>> {
         self.read_all(
             "SELECT file_id, data FROM body_index WHERE ml_version >= ?",
@@ -38,5 +44,20 @@ mod tests {
         assert_eq!(db.body_indexes(1).unwrap().len(), 1);
         db.clear_non_pet_tables().unwrap();
         assert!(db.body_indexes(1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn body_status_selects_current_models_without_returning_vectors() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = MlDb::open(directory.path().join("ml.db")).unwrap();
+        db.put_body_index(1, r#"{"model":"current","detections":[]}"#, 1)
+            .unwrap();
+        db.put_body_index(2, r#"{"model":"other","detections":[]}"#, 1)
+            .unwrap();
+        db.put_body_index(3, r#"{"error":true}"#, 1).unwrap();
+        db.put_body_index(4, "invalid JSON", 1).unwrap();
+        db.put_body_index(5, r#"{"model":"current","detections":[]}"#, 2)
+            .unwrap();
+        assert_eq!(db.body_indexed_file_ids(1, "current").unwrap(), vec![1]);
     }
 }

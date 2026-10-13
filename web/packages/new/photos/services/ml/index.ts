@@ -22,9 +22,15 @@ import {
     type CGroup,
 } from "../user-entity";
 import { deleteUserEntity } from "../user-entity/remote";
+import { bodyGroupWithID, splitBodyGroup } from "./body-review";
 import type { ClusterFacesReason, FaceCluster } from "./cluster";
 import { regenerateFaceCrops } from "./crop";
-import { clearMLDB, savedFaceIndex, savedIndexCounts } from "./db";
+import {
+    clearMLDB,
+    savedBodyIndexCount,
+    savedFaceIndex,
+    savedIndexCounts,
+} from "./db";
 import { fileIDFromFaceID } from "./face";
 import {
     _applyPersonSuggestionUpdates,
@@ -215,6 +221,7 @@ export type MLStatus =
           phaseFailed?: boolean;
           nSyncedFiles: number;
           nTotalFiles: number;
+          nBodyIndexedFiles?: number;
       };
 
 export const mlStatusSubscribe = (onChange: () => void): (() => void) => {
@@ -248,6 +255,7 @@ const getMLStatus = async (): Promise<MLStatus> => {
     if (!_state.isMLEnabled) return { phase: "disabled" };
 
     const w = await worker();
+    const bodyIndexedCount = await savedBodyIndexCount();
 
     const clusteringProgress = await w.clusteringProgress;
     if (clusteringProgress) {
@@ -255,6 +263,7 @@ const getMLStatus = async (): Promise<MLStatus> => {
             phase: "clustering",
             nSyncedFiles: clusteringProgress.completed,
             nTotalFiles: clusteringProgress.total,
+            nBodyIndexedFiles: bodyIndexedCount,
         };
     }
 
@@ -279,6 +288,7 @@ const getMLStatus = async (): Promise<MLStatus> => {
         phaseFailed,
         nSyncedFiles: indexedCount,
         nTotalFiles: indexableCount + indexedCount,
+        nBodyIndexedFiles: bodyIndexedCount,
     };
 };
 
@@ -589,6 +599,33 @@ export const applyPersonSuggestionUpdates = async (
         await ensureMasterKeyFromSession(),
     );
     return mlSync("apply-person-suggestion-updates");
+};
+
+export const bodyGroupPreviews = async (reference: string) => {
+    const { computeNormalCollectionFilesFromSaved } = await import("../file");
+    const files = new Map(
+        (await computeNormalCollectionFilesFromSaved()).map((f) => [f.id, f]),
+    );
+    return (await bodyGroupWithID(reference)).flatMap((m) => {
+        const file = files.get(m.fileID);
+        return file
+            ? [{ faceID: m.detection.bodyID, file, body: m.detection }]
+            : [];
+    });
+};
+
+export const separateBodyGroup = async (
+    cgroup: CGroup,
+    reference: string,
+    selected: Set<string>,
+) => {
+    const isolated = await splitBodyGroup(reference, selected);
+    await _applyPersonSuggestionUpdates(
+        cgroup,
+        new Map([[isolated, "rejectSavedChoice"]]),
+        await ensureMasterKeyFromSession(),
+    );
+    await updatePeopleState();
 };
 
 export const ignoreCluster = async (cluster: FaceCluster) => {

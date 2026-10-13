@@ -6,6 +6,18 @@ import type { Face } from "./face";
 export const bodyIndexingVersion = 1;
 export const bodyModel = "osnet-ain-x1.0-msmt17-v1";
 
+export const isUnsupportedBodyIndex = (value: unknown) => {
+    if (!value || typeof value != "object") return false;
+    const raw = value as { version?: number; model?: string };
+    return (
+        typeof raw.version == "number" &&
+        (raw.version > bodyIndexingVersion ||
+            (raw.version >= bodyIndexingVersion &&
+                typeof raw.model == "string" &&
+                raw.model != bodyModel))
+    );
+};
+
 export const BodyDetection = z.looseObject({
     bodyID: z.string().startsWith("body:"),
     box: z.object({
@@ -20,6 +32,7 @@ export const BodyDetection = z.looseObject({
         .length(512)
         .refine((v) => v.some((x) => x != 0)),
     linkedFaceID: z.string().nullish(),
+    groupID: z.string().startsWith("body-group:").optional(),
     decisions: z
         .record(
             z.string(),
@@ -50,6 +63,71 @@ export interface BodyMatch {
     similarity: number;
     margin: number;
 }
+
+export const isBodyReference = (id: string) =>
+    id.startsWith("body:") || id.startsWith("body-group:");
+
+export interface BodyGroup {
+    id: string;
+    personID: string;
+    matches: BodyMatch[];
+}
+
+// Complete-link grouping prevents a chain of similar clothes from joining
+// dissimilar endpoints. Explicit partitions from human splits never rejoin.
+export const groupBodyMatches = (
+    matches: BodyMatch[],
+    files: EnteFile[],
+    threshold = 0.8,
+): BodyGroup[] => {
+    const times = new Map(
+        files.map((f) => [f.id, fileCreationPhotoSortTime(f)]),
+    );
+    const groups: BodyGroup[] = [];
+    const ordered = [...matches].sort((a, b) =>
+        a.detection.bodyID < b.detection.bodyID
+            ? -1
+            : a.detection.bodyID > b.detection.bodyID
+              ? 1
+              : 0,
+    );
+    for (const match of ordered) {
+        const partition = match.detection.groupID;
+        const group = groups.find(
+            (g) =>
+                g.personID == match.personID &&
+                (partition
+                    ? g.id == partition
+                    : !g.matches[0]!.detection.groupID) &&
+                g.matches.every(
+                    (m) =>
+                        m.fileID != match.fileID &&
+                        (partition ||
+                            ((times.get(m.fileID) ?? 0) > 0 &&
+                                (times.get(match.fileID) ?? 0) > 0 &&
+                                Math.abs(
+                                    (times.get(m.fileID) ?? 0) -
+                                        (times.get(match.fileID) ?? 0),
+                                ) <=
+                                    3 * 60 * 60 * 1000 &&
+                                bodyCosine(
+                                    m.detection.embedding,
+                                    match.detection.embedding,
+                                ) >= threshold)),
+                ),
+        );
+        if (group) group.matches.push(match);
+        else
+            groups.push({
+                id:
+                    partition ??
+                    `body-group:${match.detection.bodyID.substring(5)}`,
+                personID: match.personID,
+                matches: [match],
+            });
+    }
+    return groups;
+};
 export const isAutomaticBodyMatch = (m: BodyMatch) =>
     m.similarity >= 0.74 && m.margin >= 0.05;
 

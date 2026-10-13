@@ -111,6 +111,18 @@ class DartMLDataDB
   }
 
   @override
+  Future<Set<int>> bodyIndexedFileIds({
+    required int version,
+    required String model,
+  }) async {
+    final rows = await (await asyncDB).getAll(
+      "SELECT file_id FROM body_index WHERE ml_version = ? AND CASE WHEN json_valid(data) THEN json_extract(data, '\$.model') = ? AND json_type(data, '\$.detections') = 'array' ELSE 0 END",
+      [version, model],
+    );
+    return rows.map((r) => r["file_id"] as int).toSet();
+  }
+
+  @override
   Future<void> deleteBodyIndexes(List<int> fileIDs) async {
     for (final chunk in fileIDs.chunks(_maxSqlBindParamsPerQuery)) {
       await (await asyncDB).execute(

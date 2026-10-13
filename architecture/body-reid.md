@@ -73,7 +73,10 @@ face/CLIP subtypes as not indexed. Existing face and CLIP
 values are retained on all body writes.
 
 Mobile now carries the fetched `updatedAt` into writes, as Desktop already did.
-Review writes refetch and merge after 409 conflicts. A body producer adopts an
+Face, CLIP and body indexing use the same metadata mutation/retry path on each
+client. A 409 conflict refetches the latest raw JSON and reapplies only the
+intended subtype mutation, up to three attempts. Body review also uses this
+shared writer; its retry loop is not separate from face/CLIP writes. A body producer adopts an
 already compatible result published by another device instead of replacing its
 review decisions. The server's current pre-write version check is not an atomic
 transaction around object-store and SQL writes, and legacy clients can still
@@ -98,10 +101,11 @@ connectivity, compute control and local indexing settings continue to gate
 inference. Body failures retain successful face/CLIP results. Corrupt input skip
 markers also cover body work.
 
-Remote body changes have a separate status-diff cursor that fetches metadata
-only for existing local body rows, so completed body indexes can receive decisions
-from another device without fetching every historical photo's mldata. Mobile body-sync failures
-do not fail the original file-data sync. Log out and ML database clearing remove
+A shared ML metadata status-diff cursor refreshes face, CLIP and body data for
+files already present in the local ML database. It does not schedule image
+inference. Mobile starts the new cursor at the previous file-data sync position
+rather than redownloading all historical metadata. Mobile ML metadata sync
+failures do not fail the original file-data status sync. Log out and ML database clearing remove
 body rows; deleted/missing files are excluded from matching and body rows are
 pruned through file-data deletion and existing cleanup paths.
 
@@ -143,9 +147,31 @@ only the storage operation and crop source to the body extension.
 - Removing an automatic photo from a person records a body rejection through the
   existing removal operation.
 
-The current body candidates are individual detections. MMR and grouping body
-candidates for fewer review interactions are deliberately separate follow-ups;
-this change does not alter the original review ranking.
+Body review candidates are groups of similar bodies proposed for the same
+person. Initial grouping uses complete-link cosine similarity >=0.8, a three-hour
+capture window and distinct files. It does not merge a similarity chain whose
+endpoints fail the threshold. Original face suggestions keep their ordering;
+body groups are appended. Normal Desktop previews show up to five crops, and
+mixed-group selection loads all members. Accept, reject and reset apply to the
+whole group, preserving ownership of pre-existing manual photo tags.
+
+Human splits persist a `groupID` partition on each detection. Automatic grouping
+never joins distinct explicit partitions or folds unpartitioned bodies into a
+human partition. Mobile reuses the cluster gallery's mixed-grouping menu and its
+existing one/multi-photo removal action; accepted body groups also appear in a
+person's cluster list. Automatic mixed-group analysis uses a stricter 0.9
+threshold. Isolating selected bodies removes only body-introduced assignments
+and rejects the former suggested person. The existing person picker can then
+assign the isolated group. Desktop provides multi-crop selection in body review
+and saved choices; separating selected bodies uses the same review assignment
+handler to remove introduced tags. Body partitions are never inserted into face
+cluster tables. Group writes span multiple file metadata objects and the person
+entity, so they are not one server transaction. MMR remains a follow-up.
+
+Mobile face suggestion rejection also records rejected face IDs through the
+existing cgroup/person sync path. Session undo removes only the rejections that
+operation introduced. Face identity assignments continue to use cgroups, not a
+second identity registry inside face mldata.
 
 ## Verification
 
@@ -163,3 +189,15 @@ and `ORT_DYLIB_PATH` to the platform ONNX Runtime library when needed.
 Regenerate exported bindings with `cargo codegen frb photos` and
 `cargo codegen napi`. Generated bindings are excluded from Git by the project's
 existing code-generation workflow.
+
+## Face model metadata and ML settings
+
+New face results record `model: mobilefacenet-portable-v1` and
+`detectorModel: yolov5s-face-v1` separately from the existing indexing `version`.
+Missing model identifiers on old metadata default to the current models when
+read. This is a read default, not a migration/backfill of every remote object.
+The original face model assets and face indexing version remain unchanged.
+Both ML settings screens show the count of valid body-indexed photos using their
+existing menu/card components. This count is separate from the original overall
+indexing progress, so missing body results on historical photos do not create
+pending work or reduce that progress.

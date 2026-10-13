@@ -9,11 +9,15 @@ import {
     updateOrCreateUserEntities,
     type CGroup,
 } from "../user-entity";
-import { isAutomaticBodyMatch, type BodyDetection } from "./body";
+import {
+    isAutomaticBodyMatch,
+    isBodyReference,
+    type BodyDetection,
+} from "./body";
 import {
     bodyChoicesForPerson,
+    bodyGroupWithID,
     bodySuggestionsForPerson,
-    bodyWithID,
     currentBodyMatches,
     updateBodyDecision,
 } from "./body-review";
@@ -523,29 +527,42 @@ export const _applyPersonSuggestionUpdates = async (
     };
 
     for (const [clusterID, assigned] of updates.entries()) {
-        if (clusterID.startsWith("body:")) {
-            const { fileID, detection } = await bodyWithID(clusterID);
-            const file = (await computeNormalCollectionFilesFromSaved()).find(
-                (f) => f.id == fileID,
+        if (isBodyReference(clusterID)) {
+            const files = new Map(
+                (await computeNormalCollectionFilesFromSaved()).map((f) => [
+                    f.id,
+                    f,
+                ]),
             );
-            if (!file) throw new Error("Missing body photo");
-            const previous = detection.decisions[cgroup.id];
-            if (assigned == "assign") {
-                const addedManual =
-                    previous?.addedManual ?? !manuallyAssigned.has(fileID);
-                manuallyAssigned.add(fileID);
-                await updateBodyDecision(file, clusterID, cgroup.id, {
-                    status: "accepted",
-                    addedManual,
-                });
-            } else {
-                if (previous?.addedManual) manuallyAssigned.delete(fileID);
-                await updateBodyDecision(
-                    file,
-                    clusterID,
-                    cgroup.id,
-                    assigned == "reset" ? undefined : { status: "rejected" },
-                );
+            for (const { fileID, detection } of await bodyGroupWithID(
+                clusterID,
+            )) {
+                const file = files.get(fileID);
+                if (!file) throw new Error("Missing body photo");
+                const previous = detection.decisions[cgroup.id];
+                if (assigned == "assign") {
+                    const addedManual =
+                        previous?.addedManual ?? !manuallyAssigned.has(fileID);
+                    manuallyAssigned.add(fileID);
+                    await updateBodyDecision(
+                        file,
+                        detection.bodyID,
+                        cgroup.id,
+                        { status: "accepted", addedManual },
+                        clusterID,
+                    );
+                } else {
+                    if (previous?.addedManual) manuallyAssigned.delete(fileID);
+                    await updateBodyDecision(
+                        file,
+                        detection.bodyID,
+                        cgroup.id,
+                        assigned == "reset"
+                            ? undefined
+                            : { status: "rejected" },
+                        clusterID,
+                    );
+                }
             }
             bodyUpdateCount++;
             continue;

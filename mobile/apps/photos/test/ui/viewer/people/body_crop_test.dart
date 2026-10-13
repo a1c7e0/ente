@@ -13,7 +13,9 @@ void main() {
     final crop = base64Decode(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
     );
-    for (final body in [true, false]) {
+    for (final reference in ["body:1_1", "body-group:1_1", "face-cluster"]) {
+      final body =
+          reference.startsWith("body:") || reference.startsWith("body-group:");
       await tester.pumpWidget(
         MaterialApp(
           theme: lightThemeData,
@@ -23,8 +25,8 @@ void main() {
               height: 100,
               child: FileFaceWidget(
                 EnteFile()..uploadedFileID = 1,
-                key: ValueKey(body),
-                clusterID: body ? "body:1_1" : "face-cluster",
+                key: ValueKey(reference),
+                clusterID: reference,
                 faceCrop: crop,
               ),
             ),
