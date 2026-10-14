@@ -383,8 +383,10 @@ export const getAnnotatedFacesForFile = async (
                     faceID: match.detection.bodyID,
                     personID: person.id,
                     personName: person.name,
+                    isIgnored: person.type == "cgroup" && person.isHidden,
                 },
-                person.fileIDs.length,
+                match.similarity,
+                person.type == "cgroup",
             ]);
     }
 
