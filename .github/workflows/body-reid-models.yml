@@ -19,6 +19,7 @@ jobs:
     publish:
         if: github.repository == 'a1c7e0/ente'
         runs-on: ubuntu-24.04
+        container: python:3.12-slim-trixie
         timeout-minutes: 15
         permissions:
             contents: write
@@ -30,6 +31,9 @@ jobs:
         steps:
             - name: Checkout
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+            - name: Install release CLI
+              run: apt-get update && apt-get install -y --no-install-recommends git gh ca-certificates
 
             - name: Install export dependencies
               run: |
