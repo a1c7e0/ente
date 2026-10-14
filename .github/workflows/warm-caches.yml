@@ -71,6 +71,15 @@ jobs:
                       ~/.cache/go-build
                       ~/.cache/.theseus/postgresql
 
+            - name: Prepare ONNX Runtime for ML tests
+              run: |
+                  node ../desktop/scripts/ort.js
+                  runtime_dir="$GITHUB_WORKSPACE/desktop/node_modules/.cache/ente-onnxruntime/$(node -p 'process.arch')"
+                  runtime_library="$(find "$runtime_dir" -name 'libonnxruntime.so*' -type f -print -quit)"
+                  test -n "$runtime_library"
+                  printf 'ORT_DYLIB_PATH=%s\n' "$runtime_library" >> "$GITHUB_ENV"
+
+
             - run: cargo test --locked --workspace --exclude ente-cli-next --features museum,ente-ml/ml-assets
               env:
                   GITHUB_TOKEN: ${{ github.token }}
