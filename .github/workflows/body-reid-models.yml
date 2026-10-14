@@ -44,6 +44,17 @@ jobs:
                   echo '59153d81aa87a215d15bdebff5ce87f676a9507a1c0eb1e2d1ddced8e0018864  osnet_ain_x1_0_msmt17.onnx' | sha256sum --check
                   sha256sum osnet_ain_x1_0_msmt17.onnx manifest.json > SHA256SUMS
 
+            - name: Retain export diagnostics
+              if: always()
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: body-model-export-diagnostics
+                  path: |
+                      /tmp/body-reid-models/osnet_ain_x1_0_msmt17.onnx
+                      /tmp/body-reid-models/manifest.json
+                  if-no-files-found: ignore
+                  retention-days: 3
+
             - name: Publish model resources
               run: |
                   if gh release view "$MODEL_RELEASE_TAG" >/dev/null 2>&1; then
