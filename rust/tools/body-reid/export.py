@@ -81,7 +81,8 @@ def main() -> None:
         output_names=["output"],
         dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
         opset_version=17,
-        do_constant_folding=True,
+        # Preserve checkpoint tensors; host-side folding changes file checksums.
+        do_constant_folding=False,
         dynamo=False,
     )
     onnx.checker.check_model(onnx.load(output))
