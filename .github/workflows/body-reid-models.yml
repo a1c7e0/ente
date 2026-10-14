@@ -40,7 +40,7 @@ jobs:
               run: |
                   /tmp/body-reid-export-env/bin/python rust/tools/body-reid/export.py --output-dir /tmp/body-reid-models
                   cd /tmp/body-reid-models
-                  echo '59153d81aa87a215d15bdebff5ce87f676a9507a1c0eb1e2d1ddced8e0018864  osnet_ain_x1_0_msmt17.onnx' | sha256sum --check
+                  echo '48c2d6a6c0078e195803d130e1f9ac1fd0c048edd28ab17b57689dff8e1ac225  osnet_ain_x1_0_msmt17.onnx' | sha256sum --check
                   sha256sum osnet_ain_x1_0_msmt17.onnx manifest.json > SHA256SUMS
 
             - name: Publish model resources
@@ -49,7 +49,7 @@ jobs:
                       mkdir -p /tmp/body-reid-published
                       gh release download "$MODEL_RELEASE_TAG" --pattern osnet_ain_x1_0_msmt17.onnx --dir /tmp/body-reid-published
                       cd /tmp/body-reid-published
-                      echo '59153d81aa87a215d15bdebff5ce87f676a9507a1c0eb1e2d1ddced8e0018864  osnet_ain_x1_0_msmt17.onnx' | sha256sum --check
+                      echo '48c2d6a6c0078e195803d130e1f9ac1fd0c048edd28ab17b57689dff8e1ac225  osnet_ain_x1_0_msmt17.onnx' | sha256sum --check
                   else
                       gh release create "$MODEL_RELEASE_TAG" \
                           /tmp/body-reid-models/osnet_ain_x1_0_msmt17.onnx \

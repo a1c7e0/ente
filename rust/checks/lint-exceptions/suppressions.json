@@ -46,6 +46,7 @@
     "rust/crates/ml/examples/ml_goldens.rs": ["dead_code"],
     "rust/crates/ml/examples/ocr.rs": ["dead_code"],
     "rust/crates/ml/src/assets.rs": ["clippy::expect_used"],
+    "rust/crates/ml/src/body.rs": ["clippy::expect_used"],
     "rust/crates/ml/src/face/align.rs": ["clippy::expect_used"],
     "rust/crates/ml/src/ocr/assets.rs": ["clippy::expect_used"],
     "rust/crates/ml/src/ocr/mod.rs": ["clippy::expect_used"],
