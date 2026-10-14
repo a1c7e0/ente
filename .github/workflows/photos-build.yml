@@ -21,7 +21,6 @@ jobs:
         env:
             CARGO_BUILD_JOBS: 2
             CARGO_INCREMENTAL: 0
-            SIGNING_KEY_PATH: ${{ runner.temp }}/photos-test.jks
             SIGNING_KEY_ALIAS: photos-test
             SIGNING_KEY_PASSWORD: android
             SIGNING_STORE_PASSWORD: android
@@ -59,6 +58,8 @@ jobs:
 
             - name: Prepare development signature and arm64 packaging
               run: |
+                  export SIGNING_KEY_PATH="$RUNNER_TEMP/photos-test.jks"
+                  printf 'SIGNING_KEY_PATH=%s\\n' "$SIGNING_KEY_PATH" >> "$GITHUB_ENV"
                   keytool -genkeypair -keystore "$SIGNING_KEY_PATH" -storepass android -keypass android -alias "$SIGNING_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Ente Photos Test APK"
                   mkdir -p "$HOME/.gradle/init.d"
                   echo 'org.gradle.workers.max=2' >> "$HOME/.gradle/gradle.properties"
