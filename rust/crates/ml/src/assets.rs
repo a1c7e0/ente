@@ -30,7 +30,7 @@ pub struct ClipTextPaths {
     pub vocab: PathBuf,
 }
 
-fn model_asset(model: Model) -> Asset {
+pub(crate) fn model_asset(model: Model) -> Asset {
     let spec = model_asset_spec(model);
     #[expect(
         clippy::expect_used,

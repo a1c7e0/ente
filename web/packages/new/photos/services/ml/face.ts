@@ -1,6 +1,8 @@
 import { assertionFailed } from "ente-base/assert";
 
 export const faceIndexingVersion = 1;
+export const faceEmbeddingModel = "mobilefacenet-portable-v1";
+export const faceDetectionModel = "yolov5s-face-v1";
 
 export interface FaceIndex {
     width: number;
@@ -15,6 +17,8 @@ export type RemoteFaceIndex = FaceIndex & {
     version: number;
     client: string;
     flags: number;
+    model: string;
+    detectorModel: string;
 };
 
 export type LocalFaceIndex = FaceIndex & { fileID: number };

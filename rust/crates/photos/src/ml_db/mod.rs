@@ -62,6 +62,7 @@ impl MlDb {
             schema::DELETE_NOT_PERSON_FEEDBACK,
             schema::DELETE_CLIP_EMBEDDINGS,
             schema::DELETE_FILE_DATA,
+            "DELETE FROM body_index",
         ])
     }
 
@@ -239,8 +240,8 @@ pub(crate) mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("ente.ml.db");
         let _db = MlDb::open(&path).unwrap();
-        assert_eq!(schema::MIGRATION_SCRIPTS.len(), 16);
-        assert_eq!(user_version(&path), 16);
+        assert_eq!(schema::MIGRATION_SCRIPTS.len(), 17);
+        assert_eq!(user_version(&path), 17);
         let connection = Connection::open(&path).unwrap();
         for table in [
             "faces",
@@ -258,6 +259,7 @@ pub(crate) mod tests {
             "pet_face_vector_id_map",
             "pet_body_vector_id_map",
             "ml_store_meta",
+            "body_index",
         ] {
             let count: i64 = connection
                 .query_row(
@@ -280,7 +282,7 @@ pub(crate) mod tests {
             db.insert_clip_rows(&[full_clip(1)]).unwrap();
         }
         let db = MlDb::open(&path).unwrap();
-        assert_eq!(user_version(&path), 16);
+        assert_eq!(user_version(&path), 17);
         assert_eq!(db.count_clip_rows().unwrap(), 1);
     }
 
@@ -291,12 +293,12 @@ pub(crate) mod tests {
         drop(MlDb::open(&path).unwrap());
         Connection::open(&path)
             .unwrap()
-            .pragma_update("user_version", 17)
+            .pragma_update("user_version", 18)
             .unwrap();
         match MlDb::open(&path) {
             Err(Error::Downgrade { current, target }) => {
-                assert_eq!(current, 17);
-                assert_eq!(target, 16);
+                assert_eq!(current, 18);
+                assert_eq!(target, 17);
             }
             other => panic!("expected downgrade error, got {:?}", other.err()),
         }
@@ -314,7 +316,7 @@ pub(crate) mod tests {
             connection.pragma_update("user_version", 1).unwrap();
         }
         let db = MlDb::open(&path).unwrap();
-        assert_eq!(user_version(&path), 16);
+        assert_eq!(user_version(&path), 17);
         assert_eq!(db.count_clip_rows().unwrap(), 0);
     }
 }

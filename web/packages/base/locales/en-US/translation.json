@@ -1150,5 +1150,7 @@
     "auto_lock_5_minutes": "5 minutes",
     "auto_lock_30_minutes": "30 minutes",
     "wrong_unlock_code_one": "You've entered the wrong unlock code {{count}} time.",
-    "wrong_unlock_code_other": "You've entered the wrong unlock code {{count}} times."
+    "wrong_unlock_code_other": "You've entered the wrong unlock code {{count}} times.",
+    "mixed_grouping": "Mixed grouping",
+    "separate_selected": "Separate selected photos"
 }

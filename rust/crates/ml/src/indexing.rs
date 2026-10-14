@@ -70,6 +70,7 @@ pub fn init_ml_runtime(model_paths: ModelPaths) {
 
 pub fn release_ml_runtime() {
     runtime::release_runtime();
+    crate::body::release_runtime();
 }
 
 pub fn analyze_image(req: AnalyzeImageRequest) -> MlResult<AnalyzeImageResult> {

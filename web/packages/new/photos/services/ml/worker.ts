@@ -4,6 +4,7 @@ import { assertionFailed } from "ente-base/assert";
 import { isNamedError, namedError } from "ente-base/error";
 import { lowercaseExtension } from "ente-base/file-name";
 import { isHTTP4xxError, isHTTPErrorWithStatus } from "ente-base/http";
+import { getKV, setKV } from "ente-base/kv";
 import log from "ente-base/log";
 import { logUnhandledErrorsAndRejectionsInWorker } from "ente-base/log-web";
 import type {
@@ -12,6 +13,7 @@ import type {
     MLWorkerAnalyzeImageResult,
 } from "ente-base/types/ipc";
 import { isNetworkDownloadError } from "ente-gallery/services/download";
+import { syncUpdatedFileDataFileIDs } from "ente-gallery/services/file-data";
 import type { ProcessableUploadItem } from "ente-gallery/services/upload";
 import { fileLogID, type EnteFile } from "ente-media/file";
 import { fileFileName } from "ente-media/file-metadata";
@@ -26,6 +28,13 @@ import {
     type IndexableImageSource,
 } from "./blob";
 import {
+    BodyIndex,
+    bodyIndexingVersion,
+    bodyModel,
+    isUnsupportedBodyIndex,
+    linkBodyFaces,
+} from "./body";
+import {
     _clipMatches,
     clearCachedCLIPIndexes,
     clipIndexingVersion,
@@ -39,20 +48,25 @@ import {
 } from "./cluster";
 import { saveFaceCropBlobs } from "./crop";
 import {
+    deleteBodyIndex,
+    markBodyIndexingFailed,
     markIndexingFailed,
     readNextIndexableFileIDs,
+    recordBodyVersion,
+    saveBodyIndex,
+    savedBodyIndexes,
     savedFaceIndexes,
     saveIndexes,
     updateAssumingLocalFiles,
 } from "./db";
-import { faceIndexingVersion, type FaceIndex } from "./face";
-import { mlIndexFlagsForRustResult } from "./index-flags";
 import {
-    fetchMLData,
-    putMLData,
-    type RawRemoteMLData,
-    type RemoteMLData,
-} from "./ml-data";
+    faceDetectionModel,
+    faceEmbeddingModel,
+    faceIndexingVersion,
+    type FaceIndex,
+} from "./face";
+import { mlIndexFlagsForRustResult } from "./index-flags";
+import { fetchMLData, updateMLData, type RemoteMLData } from "./ml-data";
 import { _suggestionsAndChoicesForPerson, type CGroupPerson } from "./people";
 import type { CLIPMatches, MLWorkerDelegate } from "./worker-types";
 
@@ -330,6 +344,67 @@ const syncWithLocalFilesAndGetFilesToIndex = async (
     const collectionFiles = await savedCollectionFiles();
     const fileByID = new Map(collectionFiles.map((f) => [f.id, f]));
 
+    const cursor = Number((await getKV("mlFileDataSyncTime")) ?? 0);
+    const indexedFileIDs = new Set([
+        ...(await savedFaceIndexes()).map((i) => i.fileID),
+        ...(await savedBodyIndexes()).map((i) => i.fileID),
+    ]);
+    await syncUpdatedFileDataFileIDs(
+        "mldata",
+        cursor,
+        async ({ fileIDs, lastUpdatedAt }) => {
+            const ids = [...fileIDs].filter(
+                (id) => fileByID.has(id) && indexedFileIDs.has(id),
+            );
+            for (let start = 0; start < ids.length; start += 200) {
+                const batch = new Map(
+                    ids
+                        .slice(start, start + 200)
+                        .map((id) => [id, fileByID.get(id)!]),
+                );
+                for (const [fileID, remote] of await fetchMLData(batch)) {
+                    const face = remote.parsed?.face;
+                    const clip = remote.parsed?.clip;
+                    if (
+                        face &&
+                        clip &&
+                        face.version >= faceIndexingVersion &&
+                        face.model == faceEmbeddingModel &&
+                        clip.version >= clipIndexingVersion
+                    ) {
+                        await saveIndexes(
+                            { ...face, fileID },
+                            { ...clip, fileID },
+                        );
+                    }
+                    const parsed = BodyIndex.safeParse(remote.raw.body);
+                    if (parsed.success)
+                        await saveBodyIndex({ ...parsed.data, fileID });
+                    else if (!remote.raw.body) {
+                        await deleteBodyIndex(fileID);
+                        await recordBodyVersion(fileID, 0);
+                    } else if (typeof remote.raw.body == "object") {
+                        const rawBody = remote.raw.body as {
+                            version?: number;
+                            model?: string;
+                        };
+                        const version = rawBody.version ?? 0;
+                        if (
+                            version > bodyIndexingVersion ||
+                            (version >= bodyIndexingVersion &&
+                                typeof rawBody.model == "string" &&
+                                rawBody.model != bodyModel)
+                        ) {
+                            await deleteBodyIndex(fileID);
+                            await recordBodyVersion(fileID, version);
+                        }
+                    }
+                }
+            }
+            await setKV("mlFileDataSyncTime", lastUpdatedAt);
+        },
+    );
+
     await updateAssumingLocalFiles(
         Array.from(fileByID.keys()),
         await savedTrashItemFileIDs(),
@@ -353,7 +428,8 @@ const index = async (
     let existingFaceIndex: FaceIndex | undefined;
     if (
         existingRemoteFaceIndex &&
-        existingRemoteFaceIndex.version >= faceIndexingVersion
+        existingRemoteFaceIndex.version >= faceIndexingVersion &&
+        existingRemoteFaceIndex.model == faceEmbeddingModel
     ) {
         const { width, height, faces } = existingRemoteFaceIndex;
         existingFaceIndex = { width, height, faces };
@@ -368,11 +444,25 @@ const index = async (
         existingCLIPIndex = { embedding };
     }
 
+    const parsedBody = BodyIndex.safeParse(remoteMLData?.raw.body);
+    const existingBodyIndex = parsedBody.success ? parsedBody.data : undefined;
+    let bodyRaw = remoteMLData?.raw.body as
+        { version?: number; model?: string } | undefined;
+    let unsupportedBody = isUnsupportedBodyIndex(bodyRaw);
+    // Keep the original remote hydration path: no body-only backfill.
     if (existingFaceIndex && existingCLIPIndex) {
         await saveIndexes(
             { fileID, ...existingFaceIndex },
             { fileID, ...existingCLIPIndex },
         );
+        if (unsupportedBody) await deleteBodyIndex(fileID);
+        if (existingBodyIndex)
+            await saveBodyIndex({ ...existingBodyIndex, fileID });
+        if (existingBodyIndex || unsupportedBody)
+            await recordBodyVersion(
+                fileID,
+                bodyRaw?.version ?? bodyIndexingVersion,
+            );
         return;
     }
 
@@ -434,6 +524,8 @@ const index = async (
             ? existingRemoteFaceIndex
             : {
                   version: faceIndexingVersion,
+                  model: faceEmbeddingModel,
+                  detectorModel: faceDetectionModel,
                   client: clientIdentifier,
                   flags: indexFlags,
                   ...faceIndex,
@@ -450,29 +542,77 @@ const index = async (
               };
 
     // Preserve fields added by newer clients when upserting known indexes.
-    const existingRawMLData = remoteMLData?.raw ?? {};
-    const rawMLData: RawRemoteMLData = {
-        ...existingRawMLData,
-        ...(existingFaceIndex ? {} : { face: remoteFaceIndex }),
-        ...(existingCLIPIndex ? {} : { clip: remoteCLIPIndex }),
-    };
-
-    log.debug(() => ["Uploading ML data", rawMLData]);
-
-    try {
-        const lastUpdatedAt = remoteMLData?.updatedAt ?? 0;
-        await putMLData(file, rawMLData, lastUpdatedAt);
-    } catch (e) {
-        // 4xx is permanent except 409, which means the data already exists.
-        if (isHTTP4xxError(e)) {
-            if (!isHTTPErrorWithStatus(e, 409)) {
-                await markIndexingFailed(fileID);
+    let bodyIndex = existingBodyIndex;
+    if (!bodyIndex && !unsupportedBody) {
+        try {
+            const analyzeBodies = (bytes: Uint8Array) => {
+                const task = _analyzeImageQueue.then(() =>
+                    electron.analyzeBodies(fileID, bytes),
+                );
+                _analyzeImageQueue = task.catch(() => undefined);
+                return task;
+            };
+            let nativeBody;
+            try {
+                nativeBody = await analyzeBodies(source.bytes);
+            } catch (e) {
+                const ext = lowercaseExtension(fileFileName(file));
+                if (!isMLDecodeError(e) || !ext || !needsJPEGConversion(ext))
+                    throw e;
+                nativeBody = await analyzeBodies(
+                    await renderableImageBytes(file, source),
+                );
             }
+            bodyIndex = BodyIndex.parse({
+                version: bodyIndexingVersion,
+                model: bodyModel,
+                client: clientIdentifier,
+                width: nativeBody.width,
+                height: nativeBody.height,
+                detections: linkBodyFaces(
+                    nativeBody.detections,
+                    faceIndex.faces,
+                ),
+            });
+        } catch (e) {
+            log.warn(
+                `Body indexing failed for ${f}; retaining face and CLIP indexes`,
+                e,
+            );
         }
+    }
+    try {
+        const latest = await updateMLData(file, (raw) => {
+            if (runFaces) raw.face = remoteFaceIndex;
+            if (runClip) raw.clip = remoteCLIPIndex;
+            const publishedBody = BodyIndex.safeParse(raw.body);
+            if (publishedBody.success) bodyIndex = publishedBody.data;
+            else if (isUnsupportedBodyIndex(raw.body)) {
+                unsupportedBody = true;
+                bodyRaw = raw.body as { version?: number; model?: string };
+                bodyIndex = undefined;
+            } else if (bodyIndex && !unsupportedBody) raw.body = bodyIndex;
+        });
+        log.debug(() => ["Uploaded ML data", latest]);
+    } catch (e) {
+        if (isHTTP4xxError(e) && !isHTTPErrorWithStatus(e, 409))
+            await markIndexingFailed(fileID);
         throw e;
     }
 
     await saveIndexes({ fileID, ...faceIndex }, { fileID, ...clipIndex });
+    if (bodyIndex) {
+        await saveBodyIndex({ ...bodyIndex, fileID });
+        await recordBodyVersion(fileID, bodyIndex.version);
+    } else if (unsupportedBody) {
+        await deleteBodyIndex(fileID);
+        await recordBodyVersion(
+            fileID,
+            bodyRaw?.version ?? bodyIndexingVersion,
+        );
+    } else {
+        await markBodyIndexingFailed(fileID);
+    }
 
     // Crop caching is best-effort and must not invalidate a saved index.
     if (runFaces && result.faceCrops) {

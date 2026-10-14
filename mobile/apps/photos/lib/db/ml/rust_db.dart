@@ -66,6 +66,18 @@ class RustMLDataDB implements IMLDataDB<int> {
   Future<rust.FillState> fillState(rust.Index index) async =>
       (await store).fillState(index: index);
 
+  @override
+  Future<Map<int, String>> bodyIndexes({int minimumVersion = 1}) async =>
+      (await store).bodyIndexes(minimumVersion: minimumVersion);
+
+  @override
+  Future<void> putBodyIndex(int fileID, String data, int version) async =>
+      (await store).putBodyIndex(fileId: fileID, data: data, version: version);
+
+  @override
+  Future<void> deleteBodyIndexes(List<int> fileIDs) async =>
+      (await store).deleteBodyIndexes(fileIds: Int64List.fromList(fileIDs));
+
   Future<void> releaseVectorIndexes() async {
     if (_dbFuture == null) return;
     try {

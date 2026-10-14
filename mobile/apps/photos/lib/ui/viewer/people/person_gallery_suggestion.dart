@@ -5,15 +5,17 @@ import "package:ente_strings/ente_strings.dart";
 import 'package:flutter/material.dart';
 import "package:logging/logging.dart";
 import "package:photos/core/event_bus.dart";
-import "package:photos/db/ml/db.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
+import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/face_thumbnail_squircle.dart";
 import "package:photos/ui/viewer/people/file_face_widget.dart";
+import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
 import "package:photos/ui/viewer/people/save_or_edit_person.dart";
 import "package:photos/utils/face/face_thumbnail_cache.dart";
@@ -321,7 +323,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   }
 
   Future<void> _captureNotPersonFeedback(ClusterSuggestion suggestion) async {
-    await MLDataDB.instance.captureNotPersonFeedback(
+    await ClusterFeedbackService.instance.rejectSuggestion(
       personID: relevantPerson.remoteID,
       clusterID: suggestion.clusterIDToMerge,
     );
@@ -349,12 +351,33 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       final clusterID = currentSuggestion.clusterIDToMerge;
       final someFile = currentSuggestion.filesInCluster.first;
 
-      final result = await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) =>
-              SaveOrEditPerson(clusterID, file: someFile, isEditing: false),
-        ),
-      );
+      final result = isBodyReference(clusterID)
+          ? await showMergeClustersToPersonPage(context)
+          : await Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => SaveOrEditPerson(
+                  clusterID,
+                  file: someFile,
+                  isEditing: false,
+                ),
+              ),
+            );
+      if (result is MergePersonSelectionResult) {
+        final selected =
+            result.person ??
+            await PersonService.instance.getPerson(result.personId);
+        if (selected == null) return;
+        if (selected.remoteID != currentSuggestion.person.remoteID) {
+          await ClusterFeedbackService.instance.rejectSuggestion(
+            personID: currentSuggestion.person.remoteID,
+            clusterID: clusterID,
+          );
+        }
+        await ClusterFeedbackService.instance.addClusterToExistingPerson(
+          person: selected,
+          clusterID: clusterID,
+        );
+      }
       if (result == null || result == false) {
         unawaited(_animateIn());
         if (mounted) {

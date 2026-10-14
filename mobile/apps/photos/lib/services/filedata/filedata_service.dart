@@ -1,18 +1,25 @@
 import "dart:async";
+import "dart:convert";
 
 import "package:computer/computer.dart";
+import "package:dio/dio.dart";
 import "package:flutter/foundation.dart" show Uint8List;
 import "package:logging/logging.dart";
+import "package:photos/core/event_bus.dart";
 import "package:photos/db/files_db.dart";
 import "package:photos/db/ml/db.dart";
+import "package:photos/events/people_changed_event.dart";
 import "package:photos/gateways/files/file_data_gateway.dart";
 import "package:photos/models/file/file.dart";
+import "package:photos/models/ml/clip.dart";
+import "package:photos/models/ml/ml_versions.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/model/enc_file_data.dart";
 import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/filedata/model/response.dart";
 import "package:photos/utils/file_key.dart";
 import "package:photos/utils/gzip.dart";
+import "package:photos/utils/ml_util.dart" show facesFromRemoteMLData;
 import "package:shared_preferences/shared_preferences.dart";
 
 const _maxMLDataBytes = 4 * 1024 * 1024;
@@ -49,11 +56,39 @@ class FileDataService {
         type: data.type.toJson(),
         encryptedData: encryptionResult.encData,
         decryptionHeader: encryptionResult.header,
+        lastUpdatedAt: data.updatedAt ?? 0,
       );
     } catch (e, s) {
       _logger.severe("putDerivedMetaData failed", e, s);
       rethrow;
     }
+  }
+
+  // Reapply a subtype update to the newest encrypted metadata after a conflict.
+  // A false result adopts existing data without replacing it.
+  Future<FileDataEntity> updateFileData(
+    EnteFile file,
+    FutureOr<bool> Function(FileDataEntity) update, {
+    DataType type = DataType.mlData,
+  }) async {
+    final fileID = file.uploadedFileID!;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      final response = await getFilesData({fileID}, type: type);
+      if (response.fetchErrorFileIDs.contains(fileID)) {
+        throw StateError("Metadata fetch failed");
+      }
+      final entity =
+          response.data[fileID] ??
+          (FileDataEntity.empty(fileID, type)..updatedAt = 0);
+      if (!await update(entity)) return entity;
+      try {
+        await putFileData(file, entity);
+        return entity;
+      } on DioException catch (e) {
+        if (e.response?.statusCode != 409 || attempt == 2) rethrow;
+      }
+    }
+    throw StateError("Metadata update failed");
   }
 
   Future<FileDataResponse> getFilesData(
@@ -133,6 +168,7 @@ class FileDataService {
       _logger.fine("Skipping file data sync in local gallery mode");
       return;
     }
+    final previousStatusCursor = _prefs.getInt("fd.lastSyncTime") ?? 0;
     try {
       bool hasMoreData = false;
       do {
@@ -153,12 +189,113 @@ class FileDataService {
         hasMoreData = result.isNotEmpty;
         previewIds = await MLDataDB.instance.getFileIDsVidPreview();
       } while (hasMoreData);
+      try {
+        if (await _syncMLData(initialCursor: previousStatusCursor)) {
+          Bus.instance.fire(PeopleChangedEvent());
+        }
+      } catch (e, s) {
+        _logger.warning(
+          "ML data sync failed; retaining the original file-data sync",
+          e,
+          s,
+        );
+      }
     } catch (e) {
       if (previewIds.isEmpty) {
         previewIds = await MLDataDB.instance.getFileIDsVidPreview();
       }
       _logger.severe("Failed to syncDiff", e);
       rethrow;
+    }
+  }
+
+  Future<bool> _syncMLData({required int initialCursor}) async {
+    if (!hasGrantedMLConsent || !localSettings.remoteFetchEnabled) return false;
+    bool changed = false;
+    while (true) {
+      final since = _prefs.getInt("ml.fd.lastSyncTime") ?? initialCursor;
+      final response = await _gateway.getStatusDiff(lastUpdatedAt: since);
+      final diff = (response["diff"] ?? []) as List;
+      if (diff.isEmpty) return changed;
+      final existing = await MLDataDB.instance.bodyIndexes();
+      final faces = await MLDataDB.instance.faceIndexedFileIds();
+      final clips = await MLDataDB.instance.clipIndexedFileWithVersion();
+      final statuses = diff
+          .map((d) => FDStatus.fromJson(d as Map<String, dynamic>))
+          .toList();
+      final ids = statuses
+          .where(
+            (s) =>
+                s.type == DataType.mlData.value &&
+                !s.isDeleted &&
+                (existing.containsKey(s.fileID) ||
+                    faces.containsKey(s.fileID) ||
+                    clips.containsKey(s.fileID)),
+          )
+          .map((s) => s.fileID)
+          .toList();
+      for (int start = 0; start < ids.length; start += 200) {
+        final end = start + 200 < ids.length ? start + 200 : ids.length;
+        final fetched = await getFilesData(ids.sublist(start, end).toSet());
+        if (fetched.fetchErrorFileIDs.isNotEmpty) {
+          throw StateError("ML metadata fetch failed");
+        }
+        for (final entity in fetched.data.values) {
+          final remoteFaces = facesFromRemoteMLData(entity);
+          if (remoteFaces != null && faces.containsKey(entity.fileID)) {
+            final local =
+                await MLDataDB.instance.getFacesForGivenFileID(entity.fileID) ??
+                [];
+            final localJSON = local.map((f) => jsonEncode(f.toJson())).toList()
+              ..sort();
+            final remoteJSON =
+                remoteFaces.map((f) => jsonEncode(f.toJson())).toList()..sort();
+            if (jsonEncode(localJSON) != jsonEncode(remoteJSON)) {
+              await MLDataDB.instance.deleteFaceIndexForFiles([entity.fileID]);
+              await MLDataDB.instance.bulkInsertFaces(remoteFaces);
+              changed = true;
+            }
+          }
+          final remoteClip = entity.getClipEmbeddingIfCompatible(clipMlVersion);
+          if (remoteClip != null && clips.containsKey(entity.fileID)) {
+            await MLDataDB.instance.putClip([
+              ClipEmbedding(
+                fileID: entity.fileID,
+                embedding: remoteClip.embedding,
+                version: remoteClip.version,
+              ),
+            ]);
+          }
+
+          final raw = entity.remoteRawData["body"];
+          if (raw is Map<String, dynamic> &&
+              (entity.bodyIndex != null || entity.hasUnsupportedBody)) {
+            final encoded = jsonEncode(raw);
+            if (existing[entity.fileID] != encoded) {
+              await MLDataDB.instance.putBodyIndex(
+                entity.fileID,
+                encoded,
+                (raw["version"] as num).toInt(),
+              );
+              changed = true;
+            }
+          } else if (raw == null && existing.containsKey(entity.fileID)) {
+            await MLDataDB.instance.deleteBodyIndexes([entity.fileID]);
+            changed = true;
+          }
+        }
+      }
+      final deleted = statuses
+          .where((s) => s.isDeleted && s.type == DataType.mlData.value)
+          .map((s) => s.fileID)
+          .toList();
+      await MLDataDB.instance.deleteBodyIndexes(deleted);
+      if (deleted.any(existing.containsKey)) changed = true;
+      final until = statuses.fold<int>(
+        since,
+        (last, s) => s.updatedAt > last ? s.updatedAt : last,
+      );
+      await _prefs.setInt("ml.fd.lastSyncTime", until);
     }
   }
 }
@@ -181,7 +318,7 @@ Future<Map<int, FileDataEntity>> _decryptFileDataComputer(
         input.data.fileID,
         input.data.type,
         decodedJson,
-      );
+      )..updatedAt = input.data.updatedAt;
     } on FormatException catch (e, s) {
       logger.warning(
         "Ignoring unparseable ML data for file id ${input.data.fileID}",

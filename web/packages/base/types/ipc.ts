@@ -139,6 +139,10 @@ export interface Electron {
 export type UtilityProcessType = "ml";
 
 export interface ElectronMLWorker {
+    analyzeBodies: (
+        fileID: number,
+        bytes: Uint8Array,
+    ) => Promise<MLWorkerBodyIndex>;
     fsStatMtime: (path: string) => Promise<number>;
     analyzeImage: (
         request: MLWorkerAnalyzeImageRequest,
@@ -147,6 +151,17 @@ export interface ElectronMLWorker {
     computeCLIPTextEmbeddingIfAvailable: (
         text: string,
     ) => Promise<Float32Array | undefined>;
+}
+
+export interface MLWorkerBodyIndex {
+    width: number;
+    height: number;
+    detections: {
+        bodyId: string;
+        boxXyxy: number[];
+        score: number;
+        embedding: number[];
+    }[];
 }
 
 export interface MLWorkerAnalyzeImageRequest {

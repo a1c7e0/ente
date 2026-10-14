@@ -10,6 +10,7 @@ class FileDataGateway {
     required String type,
     required String encryptedData,
     required String decryptionHeader,
+    int? lastUpdatedAt,
   }) async {
     await _enteDio.put(
       "/files/data",
@@ -18,6 +19,7 @@ class FileDataGateway {
         "type": type,
         "encryptedData": encryptedData,
         "decryptionHeader": decryptionHeader,
+        "lastUpdatedAt": ?lastUpdatedAt,
       },
     );
   }

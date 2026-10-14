@@ -1150,5 +1150,7 @@
     "auto_lock_5_minutes": "",
     "auto_lock_30_minutes": "",
     "wrong_unlock_code_one": "",
-    "wrong_unlock_code_other": ""
+    "wrong_unlock_code_other": "",
+    "mixed_grouping": "混合分组",
+    "separate_selected": "隔离所选照片"
 }

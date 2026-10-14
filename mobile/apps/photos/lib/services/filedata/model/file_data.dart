@@ -1,7 +1,10 @@
 import "package:ente_pure_utils/ente_pure_utils.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/face.dart";
 
 const _faceKey = 'face';
+const faceEmbeddingModel = 'mobilefacenet-portable-v1';
+const faceDetectionModel = 'yolov5s-face-v1';
 const _clipKey = 'clip';
 
 enum DataType {
@@ -24,6 +27,7 @@ enum DataType {
 }
 
 class FileDataEntity {
+  int? updatedAt;
   final int fileID;
   final Map<String, dynamic> remoteRawData;
   final DataType type;
@@ -32,6 +36,9 @@ class FileDataEntity {
 
   void validate() {
     if (type == DataType.mlData) {
+      // Independent body metadata can exist without legacy subtypes.
+      // Readers already treat absent subtypes as not indexed.
+      if (bodyIndex != null) return;
       if (remoteRawData[_faceKey] == null) {
         throw Exception('Face embedding is null');
       }
@@ -66,6 +73,22 @@ class FileDataEntity {
     remoteRawData[_clipKey] = clipEmbedding.toJson();
   }
 
+  BodyIndex? get bodyIndex => BodyIndex.tryParse(remoteRawData["body"]);
+
+  bool get hasUnsupportedBody {
+    final raw = remoteRawData["body"];
+    if (raw is! Map<String, dynamic> || raw["version"] is! num) return false;
+    final version = raw["version"] as num;
+    return version > bodyMlVersion ||
+        (version == bodyMlVersion &&
+            raw["model"] is String &&
+            raw["model"] != bodyModel);
+  }
+
+  void putBody(BodyIndex index) {
+    remoteRawData["body"] = index.toJson();
+  }
+
   RemoteFaceEmbedding? get faceEmbedding => remoteRawData[_faceKey] != null
       ? RemoteFaceEmbedding.fromJson(
           remoteRawData[_faceKey] as Map<String, dynamic>,
@@ -89,6 +112,9 @@ class RemoteFaceEmbedding {
   final String client;
   final int height;
   final int width;
+  final String model;
+  final String detectorModel;
+  final Map<String, dynamic> raw;
 
   // Bits are defined in ml_versions.dart; absent on the wire means legacy 0.
   final int flags;
@@ -100,9 +126,15 @@ class RemoteFaceEmbedding {
     required this.height,
     required this.width,
     this.flags = 0,
+    this.model = faceEmbeddingModel,
+    this.detectorModel = faceDetectionModel,
+    this.raw = const {},
   });
 
   Map<String, dynamic> toJson() => {
+    ...raw,
+    'model': model,
+    'detectorModel': detectorModel,
     'faces': faces.map((x) => x.toJson()).toList(),
     'version': version,
     'client': client,
@@ -121,6 +153,9 @@ class RemoteFaceEmbedding {
       height: json['height'] as int,
       width: json['width'] as int,
       flags: (json['flags'] as int?) ?? 0,
+      model: json['model'] as String? ?? faceEmbeddingModel,
+      detectorModel: json['detectorModel'] as String? ?? faceDetectionModel,
+      raw: json,
     );
   }
 }

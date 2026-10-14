@@ -13,10 +13,13 @@ import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/file_load_result.dart";
 import "package:photos/models/gallery_type.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/models/selected_files.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
+import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/memory_lane/memory_lane_service.dart";
 import "package:photos/ui/components/banners/name_face_banner.dart";
@@ -29,6 +32,7 @@ import "package:photos/ui/viewer/gallery/state/selection_state.dart";
 import "package:photos/ui/viewer/people/add_person_action_sheet.dart";
 import "package:photos/ui/viewer/people/cluster_app_bar.dart";
 import "package:photos/ui/viewer/people/memory_lane_page_v2.dart";
+import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/people_page.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
 import "package:photos/ui/viewer/people/save_person_banner.dart";
@@ -119,7 +123,7 @@ class _ClusterPageState extends State<ClusterPage> {
       if (mounted) setState(() {});
     };
     _timelineNotifier.addListener(_timelineListener);
-    if (widget.personID == null) {
+    if (widget.personID == null && !isBodyReference(widget.clusterID)) {
       unawaited(
         MemoryLaneService.instance.ensureTimelineReachability(
           widget.clusterID,
@@ -127,7 +131,7 @@ class _ClusterPageState extends State<ClusterPage> {
         ),
       );
     }
-    kDebugMode
+    kDebugMode && !isBodyReference(widget.clusterID)
         ? ClusterFeedbackService.instance.debugLogClusterBlurValues(
             widget.clusterID,
             clusterSize: files.length,
@@ -149,6 +153,22 @@ class _ClusterPageState extends State<ClusterPage> {
 
   Future<void> _handleSavePerson() async {
     if (_localGalleryUiMode) {
+      return;
+    }
+    if (isBodyReference(widget.clusterID)) {
+      final result = await showMergeClustersToPersonPage(context);
+      if (result == null) return;
+      final person =
+          result.person ??
+          await PersonService.instance.getPerson(result.personId);
+      if (person == null) return;
+      await BodyRecognitionService.instance.acceptGroup(
+        person,
+        widget.clusterID,
+      );
+      Bus.instance.fire(PeopleChangedEvent());
+      if (!mounted) return;
+      Navigator.pop(context);
       return;
     }
     if (widget.personID == null) {

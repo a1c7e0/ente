@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod body;
 mod clip;
 mod cv;
 mod diagnostics;

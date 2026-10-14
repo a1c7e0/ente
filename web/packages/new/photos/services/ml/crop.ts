@@ -51,7 +51,7 @@ const saveFaceCrops = async (
     );
 };
 
-const extractFaceCrop = (imageBitmap: ImageBitmap, faceBox: Box) => {
+export const extractFaceCrop = (imageBitmap: ImageBitmap, faceBox: Box) => {
     const { width: imageWidth, height: imageHeight } = imageBitmap;
 
     // Detection boxes use normalized 0–1 coordinates.

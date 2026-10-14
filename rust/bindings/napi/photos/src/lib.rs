@@ -98,6 +98,17 @@ impl AssetStore {
     }
 
     #[napi]
+    pub async fn body_model_paths(&self) -> Result<BodyModelPaths> {
+        let paths = ente_ml::body::ensure_models(&self.inner)
+            .await
+            .map_err(asset_error_to_napi)?;
+        Ok(BodyModelPaths {
+            detector: paths.detector,
+            embedder: paths.embedder,
+        })
+    }
+
+    #[napi]
     pub async fn clip_text_model_paths(&self) -> Result<ClipTextModelPaths> {
         let asset = assets::clip_text_asset();
         self.inner
@@ -114,6 +125,81 @@ impl AssetStore {
             vocab_path: paths.vocab.to_string_lossy().into_owned(),
         })
     }
+}
+
+#[napi(object)]
+pub struct BodyModelPaths {
+    pub detector: String,
+    pub embedder: String,
+}
+
+#[napi(object)]
+pub struct BodyDetection {
+    pub body_id: String,
+    pub box_xyxy: Vec<f64>,
+    pub score: f64,
+    pub embedding: Vec<f64>,
+}
+
+#[napi(object)]
+pub struct BodyIndex {
+    pub width: u32,
+    pub height: u32,
+    pub detections: Vec<BodyDetection>,
+}
+
+pub struct AnalyzeBodiesTask {
+    file_id: i64,
+    bytes: Vec<u8>,
+    paths: ente_ml::body::BodyModelPaths,
+}
+
+impl Task for AnalyzeBodiesTask {
+    type Output = std::result::Result<ente_ml::body::BodyIndex, MlError>;
+    type JsValue = BodyIndex;
+    fn compute(&mut self) -> Result<Self::Output> {
+        Ok(ente_ml::body::analyze(
+            self.file_id,
+            shared_indexing::ImageSource::Bytes(std::mem::take(&mut self.bytes)),
+            &self.paths,
+        ))
+    }
+    fn resolve(&mut self, env: Env, output: Self::Output) -> Result<BodyIndex> {
+        let result = match output {
+            Ok(result) => result,
+            Err(error) => return Err(ml_error_to_napi(env, error)?),
+        };
+        Ok(BodyIndex {
+            width: result.dimensions.width,
+            height: result.dimensions.height,
+            detections: result
+                .detections
+                .into_iter()
+                .map(|d| BodyDetection {
+                    body_id: d.body_id,
+                    box_xyxy: d.box_xyxy.into_iter().map(f64::from).collect(),
+                    score: d.score.into(),
+                    embedding: d.embedding.into_iter().map(f64::from).collect(),
+                })
+                .collect(),
+        })
+    }
+}
+
+#[napi(ts_return_type = "Promise<BodyIndex>")]
+pub fn analyze_bodies(
+    file_id: i64,
+    image_bytes: Buffer,
+    model_paths: BodyModelPaths,
+) -> AsyncTask<AnalyzeBodiesTask> {
+    AsyncTask::new(AnalyzeBodiesTask {
+        file_id,
+        bytes: image_bytes.to_vec(),
+        paths: ente_ml::body::BodyModelPaths {
+            detector: model_paths.detector,
+            embedder: model_paths.embedder,
+        },
+    })
 }
 
 #[napi(object)]

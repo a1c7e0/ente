@@ -1,0 +1,62 @@
+name: "Release (body recognition models)"
+
+on:
+    workflow_dispatch:
+    push:
+        branches: [main, feat/body-reid]
+        paths:
+            - ".github/workflows/body-reid-models.yml"
+            - "rust/tools/body-reid/export.py"
+
+permissions:
+    contents: read
+
+concurrency:
+    group: body-reid-models-v1
+    cancel-in-progress: false
+
+jobs:
+    publish:
+        if: github.repository == 'a1c7e0/ente'
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
+        permissions:
+            contents: write
+        env:
+            GH_TOKEN: ${{ github.token }}
+            GH_REPO: ${{ github.repository }}
+            MODEL_RELEASE_TAG: body-reid-models-v1
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+            - name: Install export dependencies
+              run: |
+                  python3 -m venv /tmp/body-reid-export-env
+                  /tmp/body-reid-export-env/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch==2.6.0
+                  /tmp/body-reid-export-env/bin/pip install numpy==2.2.3 onnx==1.17.0 onnxruntime==1.20.1
+
+            - name: Export and verify model
+              run: |
+                  /tmp/body-reid-export-env/bin/python rust/tools/body-reid/export.py --output-dir /tmp/body-reid-models
+                  cd /tmp/body-reid-models
+                  echo '59153d81aa87a215d15bdebff5ce87f676a9507a1c0eb1e2d1ddced8e0018864  osnet_ain_x1_0_msmt17.onnx' | sha256sum --check
+                  sha256sum osnet_ain_x1_0_msmt17.onnx manifest.json > SHA256SUMS
+
+            - name: Publish model resources
+              run: |
+                  if gh release view "$MODEL_RELEASE_TAG" >/dev/null 2>&1; then
+                      mkdir -p /tmp/body-reid-published
+                      gh release download "$MODEL_RELEASE_TAG" --pattern osnet_ain_x1_0_msmt17.onnx --dir /tmp/body-reid-published
+                      cd /tmp/body-reid-published
+                      echo '59153d81aa87a215d15bdebff5ce87f676a9507a1c0eb1e2d1ddced8e0018864  osnet_ain_x1_0_msmt17.onnx' | sha256sum --check
+                  else
+                      gh release create "$MODEL_RELEASE_TAG" \
+                          /tmp/body-reid-models/osnet_ain_x1_0_msmt17.onnx \
+                          /tmp/body-reid-models/manifest.json \
+                          /tmp/body-reid-models/SHA256SUMS \
+                          --target "$GITHUB_SHA" \
+                          --title 'Body recognition models v1 (OSNet-AIN x1.0)' \
+                          --notes 'Model resources, not an application release. Official MSMT17 OSNet-AIN x1.0 checkpoint; dynamic batch N×3×256×128 → N×512. Exported with rust/tools/body-reid/export.py and verified against PyTorch at batches 1, 3, 16 and 17. See the attached provenance manifest and SHA256SUMS.' \
+                          --prerelease --latest=false
+                  fi

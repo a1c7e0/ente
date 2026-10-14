@@ -1,4 +1,5 @@
 import "dart:async";
+import "dart:convert";
 import "dart:io" show File, Platform;
 import "dart:math" show min;
 import "dart:typed_data" show Uint8List;
@@ -23,6 +24,7 @@ import "package:photos/models/ml/ml_versions.dart";
 import "package:photos/module/download/file.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/model/file_data.dart";
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_clustering_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_db_info_for_clustering.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
@@ -624,6 +626,7 @@ class MLService {
     if (!_canRunMLFunction(function: "Indexing")) return;
 
     bool rustRuntimePrepared = false;
+    int fileAnalyzedCount = 0;
     try {
       _logger.info('starting image indexing');
       if (allowImageIndexing && localSettings.isMLLocalIndexingEnabled) {
@@ -638,7 +641,6 @@ class MLService {
             control: control,
           );
 
-      int fileAnalyzedCount = 0;
       int fileAttemptCount = 0;
       final Stopwatch stopwatch = Stopwatch()..start();
 
@@ -717,6 +719,7 @@ class MLService {
     } finally {
       await MLIndexingIsolate.instance.releaseRustRuntime();
       MLModelDownloadService.instance.invalidateModelDownloadCache();
+      if (fileAnalyzedCount > 0) Bus.instance.fire(PeopleChangedEvent());
     }
   }
 
@@ -807,6 +810,7 @@ class MLService {
       );
 
       if (missingFileIDs.isNotEmpty) {
+        await mlDataDB.deleteBodyIndexes(missingFileIDs.toList());
         await mlDataDB.deleteUnclusteredFaceIndexForFiles(
           missingFileIDs.toList(),
         );
@@ -978,7 +982,7 @@ class MLService {
         return actuallyRanML;
       }
       actuallyRanML = result.ranML;
-      if (!actuallyRanML) return actuallyRanML;
+      if (!actuallyRanML && !instruction.shouldRunBodies) return actuallyRanML;
       final bool isLocalGallery = instruction.isLocalGallery;
       final FileDataEntity? dataEntity = isLocalGallery
           ? null
@@ -1029,7 +1033,15 @@ class MLService {
         }
       }
       if (!isLocalGallery && (result.facesRan || result.clipRan)) {
-        await fileDataService.putFileData(instruction.file, dataEntity!);
+        await fileDataService.updateFileData(instruction.file, (latest) {
+          if (result.facesRan) latest.putFace(dataEntity!.faceEmbedding!);
+          if (result.clipRan) {
+            latest.putClip(
+              dataEntity!.getClipEmbeddingIfCompatible(clipMlVersion)!,
+            );
+          }
+          return true;
+        });
       }
       if (result.facesRan) await mlDataDB.bulkInsertFaces(faces);
       if (result.clipRan) {
@@ -1048,6 +1060,39 @@ class MLService {
         }
       }
 
+      if (instruction.shouldRunBodies) {
+        try {
+          final bodyFaces = faces.isNotEmpty
+              ? faces
+              : (await mlDataDB.getFacesForGivenFileID(instruction.fileKey) ??
+                    <Face>[]);
+          final bodyIndex = await BodyRecognitionService.instance.analyze(
+            instruction.fileKey,
+            filePath,
+            bodyFaces,
+          );
+          if (isLocalGallery) {
+            await BodyRecognitionService.instance.store(
+              mlDataDB,
+              instruction.fileKey,
+              bodyIndex,
+            );
+          } else {
+            await BodyRecognitionService.instance.publish(
+              mlDataDB,
+              instruction.file,
+              bodyIndex,
+            );
+          }
+          actuallyRanML = true;
+        } catch (e, s) {
+          _logger.warning(
+            "Body indexing failed for ${instruction.fileKey}; retaining face and CLIP results",
+            e,
+            s,
+          );
+        }
+      }
       _logger.info("ML result for fileID ${result.fileId} stored remote+local");
       indexedOrSkipped = true;
       return actuallyRanML;
@@ -1070,6 +1115,15 @@ class MLService {
           "Skipping ML indexing for fileID ${instruction.fileKey} (format $format, type $fileType, size $size): ${formatExpectedMlSkipReasonForLogs(e)}",
         );
         final storedMarkers = <String>[];
+        if (instruction.shouldRunBodies) {
+          await mlDataDB.putBodyIndex(
+            instruction.fileKey,
+            jsonEncode({"error": true}),
+            1,
+          );
+          storedMarkers.add("body");
+        }
+
         if (instruction.shouldRunFaces) {
           await mlDataDB.bulkInsertFaces([
             Face.empty(instruction.fileKey, error: true),

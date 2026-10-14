@@ -5,12 +5,14 @@ class EncryptedFileData {
   final String type;
   final String encryptedData;
   final String decryptionHeader;
+  final int? updatedAt;
 
   EncryptedFileData({
     required this.fileID,
     required this.type,
     required this.encryptedData,
     required this.decryptionHeader,
+    this.updatedAt,
   });
 
   factory EncryptedFileData.fromMap(Map<String, dynamic> map) {
@@ -19,6 +21,7 @@ class EncryptedFileData {
       type: map['type'] ?? '',
       encryptedData: map['encryptedData'] ?? '',
       decryptionHeader: map['decryptionHeader'] ?? '',
+      updatedAt: map['updatedAt'] as int?,
     );
   }
 

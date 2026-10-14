@@ -160,6 +160,49 @@ pub fn release_ml_runtime() {
     indexing::release_ml_runtime();
 }
 
+#[derive(Clone, Debug)]
+pub struct RustBodyDetection {
+    pub body_id: String,
+    pub box_xyxy: Vec<f64>,
+    pub score: f64,
+    pub embedding: Vec<f64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RustBodyIndex {
+    pub width: u32,
+    pub height: u32,
+    pub detections: Vec<RustBodyDetection>,
+}
+
+pub async fn analyze_bodies_rust(
+    file_id: i64,
+    image_path: String,
+    assets_dir: String,
+) -> Result<RustBodyIndex, RustMlError> {
+    let paths = ente_ml::body::ensure_models(&AssetStore::new(assets_dir)).await?;
+    let result = spawn_blocking_with(
+        move || ente_ml::body::analyze(file_id, indexing::ImageSource::Path(image_path), &paths),
+        (),
+    )
+    .await
+    .map_err(task_error)??;
+    Ok(RustBodyIndex {
+        width: result.dimensions.width,
+        height: result.dimensions.height,
+        detections: result
+            .detections
+            .into_iter()
+            .map(|d| RustBodyDetection {
+                body_id: d.body_id,
+                box_xyxy: d.box_xyxy.into_iter().map(f64::from).collect(),
+                score: d.score.into(),
+                embedding: d.embedding.into_iter().map(f64::from).collect(),
+            })
+            .collect(),
+    })
+}
+
 pub async fn analyze_image_rust(
     req: AnalyzeImageRequest,
 ) -> Result<AnalyzeImageResult, RustMlError> {

@@ -1,3 +1,4 @@
+import "dart:convert";
 import "dart:io" show File, Platform;
 import "dart:math" as math show min;
 
@@ -15,6 +16,7 @@ import "package:photos/events/local_photos_updated_event.dart";
 import "package:photos/models/file/extensions/file_props.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/file/file_type.dart";
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/clip.dart";
 import "package:photos/models/ml/face/dimension.dart";
 import "package:photos/models/ml/face/face.dart";
@@ -58,6 +60,7 @@ class FileMLInstruction {
   bool shouldRunFaces;
   bool shouldRunClip;
   bool shouldRunPets;
+  bool shouldRunBodies;
   FileDataEntity? existingRemoteFileML;
 
   FileMLInstruction({
@@ -67,8 +70,10 @@ class FileMLInstruction {
     required this.shouldRunFaces,
     required this.shouldRunClip,
     this.shouldRunPets = false,
+    this.shouldRunBodies = false,
   });
-  bool get pendingML => shouldRunFaces || shouldRunClip || shouldRunPets;
+  bool get pendingML =>
+      shouldRunFaces || shouldRunClip || shouldRunPets || shouldRunBodies;
   bool get isLocalGallery => mode == MLMode.localGallery;
   int get fileKey =>
       isLocalGallery ? localGalleryFileKey! : file.uploadedFileID!;
@@ -189,6 +194,7 @@ _getOnlineFilesForMlIndexingCandidates() async {
   final Map<int, int> petIndexedFileIDs = petEnabled
       ? await mlDataDB.petIndexedFileIds()
       : const {};
+  final bodyIndexedFileIDs = await mlDataDB.bodyIndexes();
   final Set<int> queuedFiledIDs = {};
 
   final Set<int> filesWithFDStatus = await mlDataDB.getFileIDsWithFDData(
@@ -226,6 +232,9 @@ _getOnlineFilesForMlIndexingCandidates() async {
     final shouldRunPets =
         petEnabled &&
         _shouldRunIndexing(enteFile, petIndexedFileIDs, petMlVersion);
+    final shouldRunBodies = !bodyIndexedFileIDs.containsKey(
+      enteFile.uploadedFileID,
+    );
     if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
       continue;
     }
@@ -235,6 +244,7 @@ _getOnlineFilesForMlIndexingCandidates() async {
       shouldRunFaces: shouldRunFaces,
       shouldRunClip: shouldRunClip,
       shouldRunPets: shouldRunPets,
+      shouldRunBodies: shouldRunBodies,
     );
     if ((enteFile.localID ?? '').isEmpty) {
       filesWithoutLocalID.add(instruction);
@@ -266,6 +276,9 @@ _getOnlineFilesForMlIndexingCandidates() async {
     final shouldRunPets =
         petEnabled &&
         _shouldRunIndexing(enteFile, petIndexedFileIDs, petMlVersion);
+    final shouldRunBodies = !bodyIndexedFileIDs.containsKey(
+      enteFile.uploadedFileID,
+    );
     if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
       continue;
     }
@@ -276,6 +289,7 @@ _getOnlineFilesForMlIndexingCandidates() async {
         shouldRunFaces: shouldRunFaces,
         shouldRunClip: shouldRunClip,
         shouldRunPets: shouldRunPets,
+        shouldRunBodies: shouldRunBodies,
       ),
     );
   }
@@ -333,6 +347,7 @@ Future<List<FileMLInstruction>> getLocalGalleryFilesForMlIndexing() async {
   final Map<int, int> petIndexedFileIDs = petEnabled
       ? await mlDataDB.petIndexedFileIds()
       : const {};
+  final bodyIndexedFileIDs = await mlDataDB.bodyIndexes();
   final Set<int> queuedFileIDs = {};
 
   final enteFiles = await SearchService.instance.getAllFilesForSearch();
@@ -384,6 +399,7 @@ Future<List<FileMLInstruction>> getLocalGalleryFilesForMlIndexing() async {
           petIndexedFileIDs,
           petMlVersion,
         );
+    final shouldRunBodies = !bodyIndexedFileIDs.containsKey(localIntId);
     if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
       continue;
     }
@@ -395,6 +411,7 @@ Future<List<FileMLInstruction>> getLocalGalleryFilesForMlIndexing() async {
         shouldRunFaces: shouldRunFaces,
         shouldRunClip: shouldRunClip,
         shouldRunPets: shouldRunPets,
+        shouldRunBodies: shouldRunBodies,
       ),
     );
   }
@@ -617,7 +634,7 @@ Future<List<FileMLInstruction>> hydrateRemoteMLDataForInstructions(
     if (existingInstruction == null) {
       continue;
     }
-    final facesFromRemoteEmbedding = _getFacesFromRemoteEmbedding(fileMl);
+    final facesFromRemoteEmbedding = facesFromRemoteMLData(fileMl);
     // A non-null result is compatible remote data, even when no face was found.
     if (facesFromRemoteEmbedding != null) {
       faces.addAll(facesFromRemoteEmbedding);
@@ -636,6 +653,24 @@ Future<List<FileMLInstruction>> hydrateRemoteMLDataForInstructions(
       );
       existingInstruction.shouldRunClip = false;
     }
+    final remoteBody = fileMl.remoteRawData["body"];
+    if (remoteBody is Map<String, dynamic> &&
+        (remoteBody["version"] as num? ?? 0) >= bodyMlVersion) {
+      if (fileMl.bodyIndex != null || fileMl.hasUnsupportedBody) {
+        await mlDataDB.putBodyIndex(
+          fileMl.fileID,
+          jsonEncode(remoteBody),
+          (remoteBody["version"] as num).toInt(),
+        );
+        existingInstruction.shouldRunBodies = false;
+      }
+    }
+    // Hydrating completed legacy indexes must not trigger body-only work.
+    if (!existingInstruction.shouldRunFaces &&
+        !existingInstruction.shouldRunClip &&
+        !existingInstruction.shouldRunPets) {
+      existingInstruction.shouldRunBodies = false;
+    }
     if (!existingInstruction.pendingML) {
       pendingIndex.remove(fileMl.fileID);
     } else {
@@ -651,7 +686,7 @@ Future<List<FileMLInstruction>> hydrateRemoteMLDataForInstructions(
       .toList();
 }
 
-List<Face>? _getFacesFromRemoteEmbedding(FileDataEntity fileMl) {
+List<Face>? facesFromRemoteMLData(FileDataEntity fileMl) {
   final RemoteFaceEmbedding? remoteFaceEmbedding = fileMl.faceEmbedding;
   if (_shouldDiscardRemoteEmbedding(fileMl)) {
     return null;
@@ -674,7 +709,9 @@ List<Face>? _getFacesFromRemoteEmbedding(FileDataEntity fileMl) {
 bool _shouldDiscardRemoteEmbedding(FileDataEntity fileML) {
   final fileID = fileML.fileID;
   final RemoteFaceEmbedding? faceEmbedding = fileML.faceEmbedding;
-  if (faceEmbedding == null || faceEmbedding.version < faceMlVersion) {
+  if (faceEmbedding == null ||
+      faceEmbedding.version < faceMlVersion ||
+      faceEmbedding.model != faceEmbeddingModel) {
     _logger.info(
       "Discarding remote embedding for fileID $fileID "
       "because version is ${faceEmbedding?.version} and we need $faceMlVersion",

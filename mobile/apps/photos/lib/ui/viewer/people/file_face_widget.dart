@@ -6,6 +6,7 @@ import "package:logging/logging.dart";
 import "package:photos/db/ml/db.dart";
 import "package:photos/db/offline_files_db.dart";
 import 'package:photos/models/file/file.dart';
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
 import "package:photos/theme/ente_theme.dart";
@@ -83,7 +84,16 @@ class _FileFaceWidgetState extends State<FileFaceWidget> {
               : MemoryImage(snapshot.data!);
           return Stack(
             fit: StackFit.expand,
-            children: [Image(image: imageProvider, fit: BoxFit.cover)],
+            children: [
+              Image(
+                image: imageProvider,
+                fit:
+                    widget.clusterID != null &&
+                        isBodyReference(widget.clusterID!)
+                    ? BoxFit.contain
+                    : BoxFit.cover,
+              ),
+            ],
           );
         } else {
           if (snapshot.hasError) {
@@ -106,6 +116,13 @@ class _FileFaceWidgetState extends State<FileFaceWidget> {
       return widget.faceCrop;
     }
     try {
+      if (widget.clusterID != null && isBodyReference(widget.clusterID!)) {
+        return await precomputeClusterFaceCrop(
+          widget.file,
+          widget.clusterID!,
+          useFullFile: widget.useFullFile,
+        );
+      }
       final mlDataDB = isLocalGalleryMode
           ? MLDataDB.localGalleryInstance
           : MLDataDB.instance;

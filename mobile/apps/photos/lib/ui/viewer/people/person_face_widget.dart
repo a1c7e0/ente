@@ -13,9 +13,11 @@ import "package:photos/db/offline_files_db.dart";
 import "package:photos/events/contacts_changed_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import 'package:photos/models/file/file.dart';
+import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/photos_contacts_service.dart";
@@ -264,6 +266,19 @@ class _PersonFaceWidgetState extends State<PersonFaceWidget>
   }) async {
     try {
       final String personOrClusterId = widget.personId ?? widget.clusterID!;
+      if (widget.clusterID != null && isBodyReference(widget.clusterID!)) {
+        final members = await BodyRecognitionService.instance.groupMembers(
+          widget.clusterID!,
+        );
+        final file = await FilesDB.instance.getAnyUploadedFile(
+          members.first.$1,
+        );
+        if (file == null) return null;
+        return (await BodyRecognitionService.instance.crop(
+          file,
+          widget.clusterID!,
+        ))[file.uploadedFileID];
+      }
       String? fixedFaceID;
       PersonEntity? personEntity;
       final mlDataDB = isLocalGalleryMode

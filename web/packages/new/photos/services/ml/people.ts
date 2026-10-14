@@ -9,6 +9,18 @@ import {
     updateOrCreateUserEntities,
     type CGroup,
 } from "../user-entity";
+import {
+    isAutomaticBodyMatch,
+    isBodyReference,
+    type BodyDetection,
+} from "./body";
+import {
+    bodyChoicesForPerson,
+    bodyGroupWithID,
+    bodySuggestionsForPerson,
+    currentBodyMatches,
+    updateBodyDecision,
+} from "./body-review";
 import type { FaceCluster } from "./cluster";
 import { savedFaceClusters, savedFaceIndexes, saveFaceClusters } from "./db";
 import { fileIDFromFaceID } from "./face";
@@ -55,6 +67,7 @@ export type NamedPerson = Person & { name: string };
 export interface PreviewableFace {
     faceID: string;
     file: EnteFile;
+    body?: BodyDetection;
 }
 
 export interface PeopleState {
@@ -102,6 +115,7 @@ export const reconstructPeopleState = async (): Promise<PeopleState> => {
     type Interim = (Person | undefined)[];
 
     const cgroups = await savedCGroups();
+    const bodyMatches = await currentBodyMatches(normalCollectionFiles);
     const cgroupPeople: Interim = cgroups.map((cgroup) => {
         const { id, data } = cgroup;
         const { name, assigned } = data;
@@ -129,6 +143,10 @@ export const reconstructPeopleState = async (): Promise<PeopleState> => {
         const fileIDsSet = new Set(faces.map((f) => f.file.id));
         for (const fileID of data.manuallyAssigned) {
             if (fileByID.has(fileID)) fileIDsSet.add(fileID);
+        }
+        for (const match of bodyMatches) {
+            if (match.personID == id && isAutomaticBodyMatch(match))
+                fileIDsSet.add(match.fileID);
         }
         const fileIDs = [...fileIDsSet];
 
@@ -434,6 +452,8 @@ export const _suggestionsAndChoicesForPerson = async (
         `Generated ${suggestions.length} suggestions for ${person.id} using ${suggestionMode} (${Date.now() - startTime} ms)`,
     );
 
+    suggestions.push(...(await bodySuggestionsForPerson(person)));
+    choices.push(...(await bodyChoicesForPerson(person)));
     return { choices, suggestions };
 };
 
@@ -455,6 +475,8 @@ export const _applyPersonSuggestionUpdates = async (
 
     let assignUpdateCount = 0;
     let rejectUpdateCount = 0;
+    let bodyUpdateCount = 0;
+    const manuallyAssigned = new Set(cgroup.data.manuallyAssigned);
 
     const clusterWithID = (clusterID: string) =>
         localClusters.find((c) => c.id == clusterID)!;
@@ -505,6 +527,46 @@ export const _applyPersonSuggestionUpdates = async (
     };
 
     for (const [clusterID, assigned] of updates.entries()) {
+        if (isBodyReference(clusterID)) {
+            const files = new Map(
+                (await computeNormalCollectionFilesFromSaved()).map((f) => [
+                    f.id,
+                    f,
+                ]),
+            );
+            for (const { fileID, detection } of await bodyGroupWithID(
+                clusterID,
+            )) {
+                const file = files.get(fileID);
+                if (!file) throw new Error("Missing body photo");
+                const previous = detection.decisions[cgroup.id];
+                if (assigned == "assign") {
+                    const addedManual =
+                        previous?.addedManual ?? !manuallyAssigned.has(fileID);
+                    manuallyAssigned.add(fileID);
+                    await updateBodyDecision(
+                        file,
+                        detection.bodyID,
+                        cgroup.id,
+                        { status: "accepted", addedManual },
+                        clusterID,
+                    );
+                } else {
+                    if (previous?.addedManual) manuallyAssigned.delete(fileID);
+                    await updateBodyDecision(
+                        file,
+                        detection.bodyID,
+                        cgroup.id,
+                        assigned == "reset"
+                            ? undefined
+                            : { status: "rejected" },
+                        clusterID,
+                    );
+                }
+            }
+            bodyUpdateCount++;
+            continue;
+        }
         switch (assigned) {
             case "assign":
                 assign(clusterID);
@@ -529,7 +591,11 @@ export const _applyPersonSuggestionUpdates = async (
         }
     }
 
-    if (assignUpdateCount > 0 || newlyRejectedFaceIDs.length > 0) {
+    if (
+        assignUpdateCount > 0 ||
+        newlyRejectedFaceIDs.length > 0 ||
+        bodyUpdateCount > 0
+    ) {
         const assigned = assignedClusters;
         const rejectedFaceIDs =
             cgroup.data.rejectedFaceIDs.concat(newlyRejectedFaceIDs);
@@ -538,7 +604,12 @@ export const _applyPersonSuggestionUpdates = async (
             [
                 {
                     ...cgroup,
-                    data: { ...cgroup.data, assigned, rejectedFaceIDs },
+                    data: {
+                        ...cgroup.data,
+                        assigned,
+                        rejectedFaceIDs,
+                        manuallyAssigned: [...manuallyAssigned],
+                    },
                 },
             ],
             masterKey,

@@ -23,6 +23,7 @@ process.parentPort.once("message", (e) => {
         {
             fsStatMtime,
             analyzeImage,
+            analyzeBodies,
             releaseMLRuntime,
             computeCLIPTextEmbeddingIfAvailable,
         },
@@ -98,6 +99,11 @@ const assetStore = () => {
     throw mlInitError(
         `ML is unavailable: ${_nativeLoadError ?? "asset store not loaded"}`,
     );
+};
+
+export const analyzeBodies = async (fileID: number, bytes: Uint8Array) => {
+    const paths = await assetStore().bodyModelPaths();
+    return mlNative().analyzeBodies(fileID, uint8ArrayToBuffer(bytes), paths);
 };
 
 const mlInitError = (message: string) => {

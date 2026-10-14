@@ -8,6 +8,9 @@ import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_db_info_for_clustering.dart";
 
 abstract class IMLDataDB<T> {
+  Future<Map<int, String>> bodyIndexes({int minimumVersion = 1});
+  Future<void> putBodyIndex(int fileID, String data, int version);
+  Future<void> deleteBodyIndexes(List<int> fileIDs);
   Future<void> bulkInsertFaces(List<Face> faces);
   Future<void> updateFaceIdToClusterId(Map<String, String> faceIDToClusterID);
   Future<Map<int, int>> faceIndexedFileIds({int minimumMlVersion});

@@ -6,7 +6,12 @@ import { nullToUndefined } from "ente-utils/transform";
 import { z } from "zod";
 import { gunzipWithLimit, gzip } from "../../utils/gzip";
 import type { RemoteCLIPIndex } from "./clip";
-import type { RemoteFaceIndex } from "./face";
+import {
+    faceDetectionModel,
+    faceEmbeddingModel,
+    type RemoteFaceIndex,
+} from "./face";
+import { mergeMetadata } from "./metadata-update";
 
 const maxMLDataBytes = 4 * 1024 * 1024;
 
@@ -24,10 +29,18 @@ type ParsedRemoteMLData = Partial<{
     clip: RemoteCLIPIndex;
 }>;
 
-const RemoteFaceIndex = z.object({
+const RemoteFaceIndex = z.looseObject({
     version: z.number(),
     client: z.string(),
     flags: z.number().int().default(0),
+    model: z
+        .string()
+        .nullish()
+        .transform((value) => value ?? faceEmbeddingModel),
+    detectorModel: z
+        .string()
+        .nullish()
+        .transform((value) => value ?? faceDetectionModel),
     width: z.number(),
     height: z.number(),
     faces: z.array(
@@ -101,7 +114,7 @@ export const fetchMLData = async (
     return result;
 };
 
-const remoteMLDataFromJSONString = (
+export const remoteMLDataFromJSONString = (
     jsonString: string,
     updatedAt: number | undefined,
 ) => {
@@ -123,4 +136,19 @@ export const putMLData = async (
         "mldata",
         await gzip(JSON.stringify(mlData)),
         lastUpdatedAt,
+    );
+
+export const updateMLData = (
+    file: EnteFile,
+    update: (raw: RawRemoteMLData) => unknown,
+) =>
+    mergeMetadata(
+        async () => {
+            const remote = (await fetchMLData(new Map([[file.id, file]]))).get(
+                file.id,
+            );
+            return { data: remote?.raw ?? {}, updatedAt: remote?.updatedAt };
+        },
+        (raw, updatedAt) => putMLData(file, raw, updatedAt),
+        update,
     );
