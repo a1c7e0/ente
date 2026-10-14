@@ -1,4 +1,4 @@
-//! Human body indexing is independent of the face and CLIP pipelines.
+// Human body indexing is independent of the face and CLIP pipelines.
 use std::sync::{Mutex, PoisonError};
 
 use ente_assets::{Asset, AssetFile, AssetStore};
@@ -33,7 +33,7 @@ pub struct BodyModelPaths {
 #[derive(Clone, Debug)]
 pub struct BodyDetection {
     pub body_id: String,
-    /// Coordinates in the decoded, EXIF-oriented image, normalized to [0, 1].
+    // Coordinates in the decoded, EXIF-oriented image, normalized to [0, 1].
     pub box_xyxy: [f32; 4],
     pub score: f32,
     pub embedding: Vec<f32>,
