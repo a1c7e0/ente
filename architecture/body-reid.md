@@ -10,7 +10,7 @@ The human detector uses class 0 of Ente's existing, pinned
 `yolov5s_object_fp16.onnx` asset. Body embeddings use the public
 `osnet_ain_x1_0_msmt17.onnx` export of the same official MSMT17 checkpoint
 used by reid-demo. Both assets go through AssetStore. The embedder is about
-8.7 MB; it expects ImageNet-normalized RGB CHW crops of 128×256 pixels and
+8.9 MB; it expects ImageNet-normalized RGB CHW crops of 128×256 pixels and
 returns 512-dimensional vectors. Its batch dimension is dynamic; inference
 runs at most 16 crops per batch, without padding the final batch. Returned vectors are
 L2-normalized. Body sessions run on CPU and are released with the existing ML
@@ -24,7 +24,9 @@ and 17. Run it with the dependencies specified in its docstring and an explicit
 `--output-dir`. The release includes the export manifest. The catalog verifies
 the exported file's size and SHA-256 before use. The earlier unshipped x0.25
 prototype uses a distinct model identifier; its vectors are not mixed with AIN.
-Face/CLIP indexing versions stay unchanged.
+Export preserves checkpoint tensors without host-side constant folding so the
+file checksum is reproducible; ONNX Runtime performs graph optimization when
+loading the model. Face/CLIP indexing versions stay unchanged.
 
 The fork's `Release (body recognition models)` workflow can reproduce and publish
 the resource release. It checks the exact catalog checksum before publication;

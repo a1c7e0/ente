@@ -67,8 +67,8 @@ pub fn model_assets() -> Vec<Asset> {
         vec![AssetFile {
             name: EMBEDDER_FILE.into(),
             url: "https://github.com/a1c7e0/ente/releases/download/body-reid-models-v1/osnet_ain_x1_0_msmt17.onnx".into(),
-            size: 8_742_433,
-            sha256: "59153d81aa87a215d15bdebff5ce87f676a9507a1c0eb1e2d1ddced8e0018864".into(),
+            size: 8_900_139,
+            sha256: "48c2d6a6c0078e195803d130e1f9ac1fd0c048edd28ab17b57689dff8e1ac225".into(),
         }],
     ).expect("valid body model catalog");
     vec![assets::model_asset(Model::PetBodyDetection), embedder]
