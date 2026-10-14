@@ -46,7 +46,9 @@ jobs:
                   rustup update stable
                   rustup default stable
                   rustup target add aarch64-linux-android
-                  sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
+                  sdkmanager_path="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -n 1)"
+                  test -n "$sdkmanager_path"
+                  "$sdkmanager_path" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
             - name: Resolve locked Photos dependencies
               working-directory: mobile/apps/photos
