@@ -53,8 +53,9 @@ On mobile, anonymous local-gallery indexing can download the models, run body
 inference, and store results in the local-gallery ML database. Body matching,
 grouping, crops, and review currently still use uploaded file IDs and the account
 ML database. Anonymous body review is therefore not supported yet. Upstream also
-requires an account for saving named people and person suggestions; supporting
-the full anonymous review flow requires handling those operations locally.
+requires an account for saving named people and person suggestions. This fork
+retains those account requirements and does not extend anonymous mode with
+person saving or review operations that upstream does not support.
 
 Model downloads require network access initially. Body inference accompanies
 normal photo indexing: missing body data alone does not trigger historical
