@@ -7,7 +7,8 @@ anonymous-mode account requirements.
 ## On a phone
 
 The diagnostic APK is named **Ente ML Lab**, with package ID
-`io.ente.photos.mldiagnostics`. It installs alongside the previous Ente Dev APK
+`io.ente.photos.dev.debug`, using upstream's registered development-debug
+client configuration. It installs alongside the previous Ente Dev APK
 and official Photos. Android keeps each application's local database separate;
 the Lab cannot read another application's local-only ML data. Account-backed
 metadata can be received through the normal encrypted sync flow.

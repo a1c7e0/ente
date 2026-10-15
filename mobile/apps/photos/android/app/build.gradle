@@ -101,7 +101,7 @@ android {
         }
         dev {
             dimension "default"
-            applicationIdSuffix ".mldiagnostics"
+            applicationIdSuffix ".dev.debug"
         }
         playstore {
             dimension "default"
