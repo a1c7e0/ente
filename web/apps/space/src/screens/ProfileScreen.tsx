@@ -199,7 +199,7 @@ const ProfilePostLoadingIndicator: React.FC<{ coverHeight: number }> = ({
             justifyContent: "center",
             pointerEvents: "none",
             position: "absolute",
-            top: `var(--space-profile-post-loading-top, ${coverHeight}px)`,
+            top: `var(--space-profile-post-loading-top, calc(${coverHeight}px + var(--space-profile-safe-area-top, 0px)))`,
             width: "100%",
         }}
     >
@@ -545,15 +545,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 (loadedPostImageURLFor(profilePostPhoto(item, index)) ?? ""),
         })),
     );
-    const selectedPhotoIndex = selectedPost
-        ? profileViewerPhotos.findIndex(
-              (photo) =>
-                  photo.id == selectedPost.id &&
-                  photo.postPhotoIndex == selectedPost.photoIndex,
-          )
-        : 0;
+    const selectedPostPhotos = profileViewerPhotos.filter(
+        (photo) => photo.id == selectedPost?.id,
+    );
     const handleSelectedPostIndexChange = (photoIndex: number) => {
-        const photo = profileViewerPhotos[photoIndex];
+        const photo = selectedPostPhotos[photoIndex];
         if (!photo) return;
         setSelectedPost({
             id: photo.id,
@@ -660,7 +656,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     gridTemplateColumns: isPublicProfile
                         ? undefined
                         : `${spaceTouchTargetSize}px minmax(0, 1fr) ${spaceTouchTargetSize}px`,
-                    height: profileHeaderHeight,
+                    height: `calc(${profileHeaderHeight}px + var(--space-profile-safe-area-top))`,
                     justifyContent: isPublicProfile
                         ? "space-between"
                         : undefined,
@@ -669,8 +665,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         ? "clamp(0, calc((var(--space-friend-profile-reveal, 0) - 0.7) * 5), 1)"
                         : 1,
                     position: "relative",
-                    px: isPublicProfile ? 1 : 2,
-                    py: 0,
+                    pl: `max(${isPublicProfile ? 8 : 16}px, var(--space-ios-safe-area-left, 0px))`,
+                    pr: `max(${isPublicProfile ? 8 : 16}px, var(--space-ios-safe-area-right, 0px))`,
+                    pt: "var(--space-profile-safe-area-top)",
+                    pb: 0,
                     width: "100%",
                     zIndex: 3,
                     "@media (min-width: 600px)": {
@@ -816,6 +814,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         <Box
             component="main"
             sx={{
+                "--space-profile-safe-area-top": isPreview
+                    ? "max(0px, calc(var(--space-ios-safe-area-top, 0px) - var(--space-friend-profile-top, 100vh)))"
+                    : "var(--space-ios-safe-area-top, 0px)",
                 background: spaceAppBackground,
                 color: textBase,
                 display: "grid",
@@ -859,7 +860,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         insetInline: 0,
                         overflow: "hidden",
                         position: "absolute",
-                        top: 0,
+                        top: "var(--space-profile-safe-area-top)",
                         width: "100%",
                         zIndex: 0,
                     }}
@@ -922,7 +923,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                             insetInline: 0,
                             p: 0,
                             position: "absolute",
-                            top: 0,
+                            top: "var(--space-profile-safe-area-top)",
                             width: "100%",
                             zIndex: 2,
                             "&:focus-visible": {
@@ -1444,7 +1445,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                                 pointerEvents: "none",
                                 position: "absolute",
                                 px: 3,
-                                top: `${profileCoverHeight}px`,
+                                top: `calc(${profileCoverHeight}px + var(--space-profile-safe-area-top))`,
                                 bottom: 0,
                                 insetInline: 0,
                                 textAlign: "center",
@@ -1512,8 +1513,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         closeOnSwipePastEnd
                         headerHeight={profileHeaderHeight}
                         photo={selectedPost.photo}
-                        photos={profileViewerPhotos}
-                        photoIndex={selectedPhotoIndex}
+                        photos={selectedPostPhotos}
+                        photoIndex={selectedPost.photoIndex}
                         onPhotoIndexChange={handleSelectedPostIndexChange}
                         onLoadPhoto={onLoadPostImage}
                         postActionMode={selectedPostActionMode}

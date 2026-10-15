@@ -14,6 +14,36 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 #[test]
+fn completion_prints_scripts_without_storage() {
+    let home = TestHome::new();
+    let path = home.dir.path().join("unused");
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        let output = success(
+            home.command(&["completion", shell, "--json", "--offline", "--no-input"])
+                .env("ENTE_CLI_HOME", &path)
+                .env("ENTE_CLI_VAULT_KEY", "invalid")
+                .output()
+                .unwrap(),
+        );
+        assert!(output.stderr.is_empty(), "{shell}");
+        let script = String::from_utf8(output.stdout).unwrap();
+        assert!(serde_json::from_str::<Value>(&script).is_err(), "{shell}");
+        for item in [
+            "help-all",
+            "account",
+            "paste",
+            "hardlinks",
+            "completion",
+            "admin",
+            "update-subscription",
+        ] {
+            assert!(script.contains(item), "{shell}: {item}");
+        }
+        assert!(!path.exists(), "{shell} created the CLI home");
+    }
+}
+
+#[test]
 fn reads_do_not_initialize_storage() {
     let binary = format!("ente-cli-next{}", std::env::consts::EXE_SUFFIX);
     for existing_home in [false, true] {
@@ -961,21 +991,28 @@ fn failure(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-#[path = "support/files.rs"]
-mod files;
+#[path = "support/admin.rs"]
+mod admin;
+
+#[cfg(feature = "museum")]
+#[path = "support/admin_museum.rs"]
+mod admin_museum;
 
 #[path = "support/auth.rs"]
 mod auth;
 
-#[path = "support/paste.rs"]
-mod paste;
+#[path = "support/export_process.rs"]
+mod export_process;
+
+#[path = "support/export_sources.rs"]
+mod export_sources;
+
+#[path = "support/files.rs"]
+mod files;
 
 #[cfg(feature = "museum")]
 #[path = "support/museum.rs"]
 mod museum;
 
-#[path = "support/export_sources.rs"]
-mod export_sources;
-
-#[path = "support/export_process.rs"]
-mod export_process;
+#[path = "support/paste.rs"]
+mod paste;

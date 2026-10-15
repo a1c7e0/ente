@@ -1,6 +1,12 @@
 name: "Publish GHCR (Server)"
 
 on:
+    push:
+        branches: [main]
+        paths:
+            - '.github/workflows/fork-publish-container.yml'
+            - '.github/workflows/server-publish-ghcr.yml'
+            - 'server/**'
     schedule:
         # Monthly on the 15th at ~10:30 AM IST
         - cron: '0 5 15 * *'
@@ -13,6 +19,7 @@ permissions:
 
 jobs:
     publish:
+        if: github.repository == 'ente/ente' && github.event_name != 'push'
         runs-on: ubuntu-latest
         steps:
             - name: Determine commit from prod museum
@@ -51,3 +58,11 @@ jobs:
                       --tag ghcr.io/ente/server:${museum_commit} \
                       --tag ghcr.io/ente/server:latest \
                       server
+
+    publish-fork:
+        if: github.repository != 'ente/ente' && github.event_name != 'schedule'
+        uses: ./.github/workflows/fork-publish-container.yml
+        with:
+            image: server
+            context: server
+            dockerfile: server/Dockerfile

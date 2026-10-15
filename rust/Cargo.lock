@@ -1355,6 +1355,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "037e2a1a92236d0aff7e845093f64661d6df4c02c9fcc61a60e9e1d736fa392f"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2446,11 +2455,9 @@ dependencies = [
  "ente-test-support",
  "getrandom 0.4.3",
  "hex",
- "hmac 0.13.0",
  "mockito",
  "serde",
  "serde_json",
- "sha1 0.11.0",
  "sha2 0.11.0",
  "srp",
  "subtle",
@@ -2537,6 +2544,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "clap_complete",
  "dialoguer",
  "dirs",
  "ente-accounts",
@@ -2555,6 +2563,7 @@ dependencies = [
  "same-file",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -3031,7 +3040,9 @@ dependencies = [
  "dirs",
  "ente-accounts",
  "ente-core",
+ "hmac 0.13.0",
  "postgresql_embedded",
+ "sha1 0.11.0",
  "tokio",
  "uuid",
 ]

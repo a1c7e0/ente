@@ -252,7 +252,7 @@ export const matchBodies = (
         });
 };
 
-export const bodyCosine = (a: number[], b: number[]) => {
+const bodyCosine = (a: number[], b: number[]) => {
     if (!a.length || a.length != b.length) return -1;
     let dot = 0,
         aa = 0,

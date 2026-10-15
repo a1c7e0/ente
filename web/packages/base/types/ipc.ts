@@ -153,7 +153,7 @@ export interface ElectronMLWorker {
     ) => Promise<Float32Array | undefined>;
 }
 
-export interface MLWorkerBodyIndex {
+interface MLWorkerBodyIndex {
     width: number;
     height: number;
     detections: {
