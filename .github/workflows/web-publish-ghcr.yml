@@ -48,4 +48,3 @@ jobs:
             image: web
             context: .
             dockerfile: web/Dockerfile
-            target: all

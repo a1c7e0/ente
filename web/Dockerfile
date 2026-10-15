@@ -1,4 +1,4 @@
-FROM node:24 AS photos-builder
+FROM node:24 AS builder
 
 RUN apt-get update && apt-get install -y curl build-essential && rm -rf /var/lib/apt/lists/* && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --target wasm32-unknown-unknown
@@ -14,9 +14,6 @@ ENV NEXT_PUBLIC_ENTE_ENDPOINT=ENTE_API_ORIGIN_PLACEHOLDER
 
 RUN npm ci
 RUN npm run build:photos
-
-FROM photos-builder AS builder
-
 RUN npm run build:albums
 RUN npm run build:accounts
 RUN npm run build:auth
@@ -27,9 +24,20 @@ RUN npm run build:paste
 RUN npm run build:locker
 RUN npm run build:memories
 
-FROM nginx AS runtime
+FROM nginx
 
 WORKDIR /out
+
+COPY --from=builder /build/web/apps/photos/out /out/photos
+COPY --from=builder /build/web/apps/albums/out /out/albums
+COPY --from=builder /build/web/apps/accounts/out /out/accounts
+COPY --from=builder /build/web/apps/auth/out /out/auth
+COPY --from=builder /build/web/apps/cast/out /out/cast
+COPY --from=builder /build/web/apps/share/out /out/share
+COPY --from=builder /build/web/apps/embed/out /out/embed
+COPY --from=builder /build/web/apps/paste/out /out/paste
+COPY --from=builder /build/web/apps/locker/out /out/locker
+COPY --from=builder /build/web/apps/memories/out /out/memories
 
 # 40-enable-ipv6.sh activates the commented listeners when IPv6 is available.
 COPY <<'EOF' /etc/nginx/conf.d/default.conf
@@ -122,28 +130,3 @@ if [ -f /proc/net/if_inet6 ]; then
 fi
 EOF
 RUN chmod +x /docker-entrypoint.d/40-enable-ipv6.sh
-
-FROM runtime AS photos
-
-COPY --from=photos-builder /build/web/apps/photos/out /out/photos
-COPY <<'EOF' /etc/nginx/conf.d/default.conf
-server {
-    listen 3000;
-    #listen [::]:3000;
-    root /out/photos;
-    location / { try_files $uri $uri.html /index.html; }
-}
-EOF
-
-FROM runtime AS all
-
-COPY --from=builder /build/web/apps/photos/out /out/photos
-COPY --from=builder /build/web/apps/albums/out /out/albums
-COPY --from=builder /build/web/apps/accounts/out /out/accounts
-COPY --from=builder /build/web/apps/auth/out /out/auth
-COPY --from=builder /build/web/apps/cast/out /out/cast
-COPY --from=builder /build/web/apps/share/out /out/share
-COPY --from=builder /build/web/apps/embed/out /out/embed
-COPY --from=builder /build/web/apps/paste/out /out/paste
-COPY --from=builder /build/web/apps/locker/out /out/locker
-COPY --from=builder /build/web/apps/memories/out /out/memories
