@@ -1,0 +1,124 @@
+name: "Publish fork container"
+
+on:
+    workflow_call:
+        inputs:
+            image:
+                type: string
+                required: true
+            context:
+                type: string
+                required: true
+            dockerfile:
+                type: string
+                required: true
+            target:
+                type: string
+                default: ''
+
+permissions:
+    contents: read
+    packages: write
+
+concurrency:
+    group: fork-container-${{ inputs.image }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - arch: amd64
+                      runner: ubuntu-24.04
+                    - arch: arm64
+                      runner: ubuntu-24.04-arm
+        runs-on: ${{ matrix.runner }}
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set image name
+              env:
+                  IMAGE: ${{ inputs.image }}
+              run: echo "CONTAINER_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE}" >> "$GITHUB_ENV"
+
+            - name: Log in to GHCR
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: printf '%s' "${GITHUB_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+            - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+            - name: Build and push native image
+              uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+              with:
+                  context: ${{ inputs.context }}
+                  file: ${{ inputs.dockerfile }}
+                  target: ${{ inputs.target }}
+                  platforms: linux/${{ matrix.arch }}
+                  push: true
+                  tags: ${{ env.CONTAINER_IMAGE }}:${{ github.sha }}-${{ matrix.arch }}
+                  build-args: GIT_COMMIT=${{ github.sha }}
+                  labels: |
+                      org.opencontainers.image.source=https://github.com/${{ github.repository }}
+                      org.opencontainers.image.revision=${{ github.sha }}
+                  cache-from: type=gha,scope=${{ inputs.image }}-${{ matrix.arch }}
+                  cache-to: type=gha,mode=max,scope=${{ inputs.image }}-${{ matrix.arch }}
+
+            - name: Verify server executable
+              if: inputs.image == 'server'
+              env:
+                  ARCH: ${{ matrix.arch }}
+              run: |
+                  docker run --rm --entrypoint /bin/sh \
+                      "${CONTAINER_IMAGE}:${GITHUB_SHA}-${ARCH}" \
+                      -c 'test -x /museum && test -d /migrations && test -d /configurations'
+
+            - name: Verify Photos Web serves HTTP
+              if: inputs.image == 'photos-web'
+              env:
+                  ARCH: ${{ matrix.arch }}
+              run: |
+                  docker run --detach --name photos-web-test \
+                      --publish 127.0.0.1:3000:3000 \
+                      --env ENTE_API_ORIGIN=https://museum.example.test \
+                      "${CONTAINER_IMAGE}:${GITHUB_SHA}-${ARCH}"
+                  trap 'docker logs photos-web-test; docker rm --force photos-web-test' EXIT
+                  curl --retry 10 --retry-connrefused --retry-delay 1 --fail \
+                      http://127.0.0.1:3000/ --output /dev/null
+                  docker exec photos-web-test sh -c \
+                      '! grep -rl ENTE_API_ORIGIN_PLACEHOLDER /out/photos --include="*.js" && grep -rl https://museum.example.test /out/photos --include="*.js" >/dev/null'
+
+    publish:
+        needs: build
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+        steps:
+            - name: Set image name
+              env:
+                  IMAGE: ${{ inputs.image }}
+              run: echo "CONTAINER_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE}" >> "$GITHUB_ENV"
+
+            - name: Log in to GHCR
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: printf '%s' "${GITHUB_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+            - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+            - name: Publish multi-platform manifest
+              run: |
+                  tags=(--tag "${CONTAINER_IMAGE}:${GITHUB_SHA}")
+                  if [ "$GITHUB_REF" = refs/heads/main ]; then
+                      tags+=(--tag "${CONTAINER_IMAGE}:latest")
+                  fi
+                  docker buildx imagetools create "${tags[@]}" \
+                      "${CONTAINER_IMAGE}:${GITHUB_SHA}-amd64" \
+                      "${CONTAINER_IMAGE}:${GITHUB_SHA}-arm64"
+                  docker buildx imagetools inspect "${CONTAINER_IMAGE}:${GITHUB_SHA}"
+                  printf 'Published `%s:%s` (linux/amd64, linux/arm64).\n' \
+                      "$CONTAINER_IMAGE" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
