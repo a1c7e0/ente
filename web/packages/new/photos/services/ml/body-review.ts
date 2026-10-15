@@ -54,7 +54,7 @@ export const currentBodyMatches = async (files: EnteFile[]) => {
     return matchCache;
 };
 
-export const currentBodyGroups = async (files: EnteFile[]) =>
+const currentBodyGroups = async (files: EnteFile[]) =>
     groupBodyMatches(await currentBodyMatches(files), files);
 
 export const bodySuggestionsForPerson = async (

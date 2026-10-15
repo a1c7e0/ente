@@ -126,7 +126,7 @@ export const remoteMLDataFromJSONString = (
     return { raw, parsed, updatedAt };
 };
 
-export const putMLData = async (
+const putMLData = async (
     file: EnteFile,
     mlData: RawRemoteMLData,
     lastUpdatedAt: number,
