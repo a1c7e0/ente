@@ -45,7 +45,7 @@ jobs:
         if: github.repository != 'ente/ente' && github.event_name != 'schedule'
         uses: ./.github/workflows/fork-publish-container.yml
         with:
-            image: photos-web
+            image: web
             context: .
             dockerfile: web/Dockerfile
-            target: photos
+            target: all
