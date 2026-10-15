@@ -19,7 +19,7 @@ permissions:
 
 jobs:
     publish:
-        if: github.repository == 'ente-io/ente' && github.event_name != 'push'
+        if: github.repository == 'ente/ente' && github.event_name != 'push'
         runs-on: ubuntu-latest
         steps:
             - name: Determine commit from prod museum
@@ -60,7 +60,7 @@ jobs:
                       server
 
     publish-fork:
-        if: github.repository != 'ente-io/ente' && github.event_name != 'schedule'
+        if: github.repository != 'ente/ente' && github.event_name != 'schedule'
         uses: ./.github/workflows/fork-publish-container.yml
         with:
             image: server
