@@ -41,11 +41,27 @@ export const SpaceAppLayout = ({ children }: { children: React.ReactNode }) => {
     const isConversation = router.pathname.startsWith(
         `${spaceRoutes.messages}/`,
     );
-    const isFriendPreview =
-        router.pathname == spaceRoutes.friends &&
-        typeof router.query.friend == "string" &&
-        router.query.expanded != "1";
-    const showNavigation = isAppPage && !isConversation && !isFriendPreview;
+    const isSettingsPage =
+        router.pathname == spaceRoutes.settings ||
+        router.pathname == spaceRoutes.settingsProfileName ||
+        router.pathname == spaceRoutes.profilePhoto ||
+        router.pathname == spaceRoutes.editProfilePhoto ||
+        router.pathname == spaceRoutes.profileCover ||
+        router.pathname == spaceRoutes.editProfileCover;
+    const isProfilePage =
+        router.pathname == spaceRoutes.profile ||
+        router.pathname == spaceRoutes.friendPage ||
+        (router.pathname == spaceRoutes.friends &&
+            typeof router.query.friend == "string" &&
+            router.query.expanded == "1");
+    const isNotificationsPage = router.pathname == spaceRoutes.notifications;
+    const showNavigation =
+        isAppPage &&
+        Boolean(profile) &&
+        !isConversation &&
+        !isSettingsPage &&
+        !isProfilePage &&
+        !isNotificationsPage;
     const spaceID =
         isAppPage && profileLoadStatus == "ready"
             ? profile?.spaceId
@@ -111,6 +127,10 @@ export const SpaceAppLayout = ({ children }: { children: React.ReactNode }) => {
                           Math.max(0, viewport.offsetTop),
                   )
                 : 0;
+            layoutRef.current?.toggleAttribute(
+                "data-space-keyboard-open",
+                keyboardInset > 0,
+            );
             layoutRef.current?.style.setProperty(
                 "--space-viewport-height",
                 `${viewport.height}px`,
@@ -169,6 +189,9 @@ export const SpaceAppLayout = ({ children }: { children: React.ReactNode }) => {
                 ref={layoutRef}
                 className={isAppPage ? "space-app-layout" : undefined}
                 data-space-conversation={isConversation || undefined}
+                data-space-settings={isSettingsPage || undefined}
+                data-space-profile={isProfilePage || undefined}
+                data-space-notifications={isNotificationsPage || undefined}
             >
                 {children}
                 {showNavigation && (
@@ -191,26 +214,12 @@ export const SpaceAppLayout = ({ children }: { children: React.ReactNode }) => {
                                 "@media (min-width: 600px)": { maxWidth: 374 },
                             }}
                         >
-                            {[
-                                { blur: 0.5, start: 0, fade: 16 },
-                                { blur: 1.5, start: 8, fade: 24 },
-                                { blur: 3.5, start: 16, fade: 32 },
-                            ].map(({ blur, start, fade }) => {
-                                const mask = `linear-gradient(to bottom, transparent ${start}px, rgba(0, 0, 0, 0.104) ${start + fade / 4}px, rgba(0, 0, 0, 0.5) ${start + fade / 2}px, rgba(0, 0, 0, 0.896) ${start + (3 * fade) / 4}px, #000 ${start + fade}px)`;
-                                return (
-                                    <Box
-                                        key={blur}
-                                        sx={{
-                                            position: "absolute",
-                                            inset: 0,
-                                            backdropFilter: `blur(${blur}px)`,
-                                            WebkitBackdropFilter: `blur(${blur}px)`,
-                                            maskImage: mask,
-                                            WebkitMaskImage: mask,
-                                        }}
-                                    />
-                                );
-                            })}
+                            {[1, 2, 3].map((layer) => (
+                                <Box
+                                    key={layer}
+                                    className={`space-bottom-nav-blur space-bottom-nav-blur-${layer}`}
+                                />
+                            ))}
                         </Box>
                         <Box
                             component="nav"
@@ -219,7 +228,7 @@ export const SpaceAppLayout = ({ children }: { children: React.ReactNode }) => {
                                 alignItems: "center",
                                 bottom: "var(--space-keyboard-inset, 0px)",
                                 display: "grid",
-                                columnGap: "12px",
+                                columnGap: "16px",
                                 gridTemplateColumns:
                                     "52px minmax(0, 208px) 52px",
                                 justifyContent: "space-between",
@@ -227,7 +236,7 @@ export const SpaceAppLayout = ({ children }: { children: React.ReactNode }) => {
                                 pb: "calc(12px + var(--space-bottom-nav-padding))",
                                 pt: "8px",
                                 left: "50%",
-                                px: "20px",
+                                px: "16px",
                                 position: "fixed",
                                 transform: "translateX(-50%)",
                                 width: "100%",

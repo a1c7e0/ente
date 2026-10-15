@@ -35,6 +35,7 @@ class PersonFaceWidget extends StatefulWidget {
   final bool useFullFile;
   final VoidCallback? onErrorCallback;
   final bool keepAlive;
+  final Object? retryKey;
 
   // Physical pixels; null or non-positive decodes at full resolution.
   final int? cachedPixelWidth;
@@ -46,6 +47,7 @@ class PersonFaceWidget extends StatefulWidget {
     this.onErrorCallback,
     this.keepAlive = false,
     this.cachedPixelWidth,
+    this.retryKey,
     super.key,
   }) : assert(
          personId != null || clusterID != null,
@@ -62,10 +64,12 @@ class _PersonFaceWidgetState extends State<PersonFaceWidget>
   int? _faceCropFileId;
   AvatarIdentity? _personIdentity;
   bool _showingFallback = false;
+  bool _faceCropFailed = false;
   bool _fallbackEverUsed = false;
   bool _personHasContactLink = false;
   int? _linkedContactUserId;
   int _loadGeneration = 0;
+  int _faceCropRetryRevision = 0;
   StreamSubscription<ContactsChangedEvent>? _contactsChangedSubscription;
   StreamSubscription<PeopleChangedEvent>? _peopleChangedSubscription;
 
@@ -100,6 +104,10 @@ class _PersonFaceWidgetState extends State<PersonFaceWidget>
       _linkedContactUserId = null;
       _personIdentity = null;
       faceCropFuture = _startFaceCropLoad();
+    } else if (widget.retryKey != null &&
+        oldWidget.retryKey != widget.retryKey) {
+      _faceCropRetryRevision++;
+      if (_faceCropFailed) faceCropFuture = _startFaceCropLoad();
     }
   }
 
@@ -208,10 +216,29 @@ class _PersonFaceWidgetState extends State<PersonFaceWidget>
     );
   }
 
-  Future<Uint8List?> _startFaceCropLoad() {
+  Future<Uint8List?> _startFaceCropLoad() async {
     final generation = ++_loadGeneration;
-    return _loadFaceCrop(generation);
+    while (true) {
+      _faceCropFailed = false;
+      final retryRevision = _faceCropRetryRevision;
+      try {
+        final crop = await _loadFaceCrop(generation);
+        if (_isCurrentLoad(generation)) _faceCropFailed = crop == null;
+        if (crop != null || !_hasNewFaceCropRetry(generation, retryRevision)) {
+          return crop;
+        }
+      } catch (_) {
+        if (_isCurrentLoad(generation)) _faceCropFailed = true;
+        if (!_hasNewFaceCropRetry(generation, retryRevision)) rethrow;
+      }
+    }
   }
+
+  bool _hasNewFaceCropRetry(int generation, int retryRevision) =>
+      mounted &&
+      _isCurrentLoad(generation) &&
+      widget.retryKey != null &&
+      _faceCropRetryRevision != retryRevision;
 
   Future<Uint8List?> _loadFaceCrop(int generation) async {
     final String personOrClusterId = widget.personId ?? widget.clusterID!;
