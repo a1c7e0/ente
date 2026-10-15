@@ -334,29 +334,39 @@ class _ModelLoadingStateState extends State<ModelLoadingState> {
 
   @override
   void initState() {
+    super.initState();
+    for (final entry
+        in MLModelDownloadService.instance.downloadProgress.entries) {
+      _recordProgress(entry.key, entry.value.$1, entry.value.$2);
+    }
     _progressStream = MLModelDownloadService.instance.progressStream.listen((
       event,
     ) {
-      final String model = event.$1;
-      String title = "";
-      if (model == "clip-image") {
-        title = "Image Model";
-      } else if (model == "clip-text") {
-        title = "Text Model";
-      } else if (model == "face-detection") {
-        title = "Face Detection Model";
-      } else if (model == "face-embedding") {
-        title = "Face Embedding Model";
-      }
-      if (title.isNotEmpty) {
-        _progressMap[title] = (event.$2, event.$3);
-        setState(() {});
-      }
+      _recordProgress(event.$1, event.$2, event.$3);
+      setState(() {});
     });
     _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
       setState(() {});
     });
-    super.initState();
+  }
+
+  void _recordProgress(String model, int downloaded, int total) {
+    final title = switch (model) {
+      "clip-image" => "Image Model",
+      "clip-text" => "Text Model",
+      "face-detection" => "Face Detection Model",
+      "face-embedding" => "Face Embedding Model",
+      "body-detection" => "Body Detection Model",
+      "body-embedding" => "Body Embedding Model",
+      "pet-face-detection" => "Pet Face Detection Model",
+      "pet-body-detection" => "Pet Body Detection Model",
+      "pet-face-embedding-dog" => "Dog Face Embedding Model",
+      "pet-face-embedding-cat" => "Cat Face Embedding Model",
+      "pet-body-embedding-dog" => "Dog Body Embedding Model",
+      "pet-body-embedding-cat" => "Cat Body Embedding Model",
+      _ => model,
+    };
+    _progressMap[title] = (downloaded, total);
   }
 
   @override
@@ -410,16 +420,18 @@ class _ModelLoadingStateState extends State<ModelLoadingState> {
           return Padding(
             padding: const EdgeInsets.only(top: 8),
             child: MenuComponent(
-              key: ValueKey(entry.value),
+              key: ValueKey(entry.key),
               title: entry.key,
               leading: const HugeIcon(
                 icon: HugeIcons.strokeRoundedCloudDownload,
                 size: IconSizes.small,
               ),
-              trailing: Text(
-                '${(entry.value.$1 * 100) ~/ entry.value.$2}%',
-                style: TextStyles.mini.copyWith(color: colors.textLight),
-              ),
+              trailing: entry.value.$2 <= 0
+                  ? EnteLoadingWidget(size: 12, color: colors.fillDark)
+                  : Text(
+                      '${(entry.value.$1 * 100) ~/ entry.value.$2}%',
+                      style: TextStyles.mini.copyWith(color: colors.textLight),
+                    ),
             ),
           );
         }),

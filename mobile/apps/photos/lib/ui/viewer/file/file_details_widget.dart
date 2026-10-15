@@ -24,6 +24,7 @@ import "package:photos/module/metadata/exif.dart";
 import "package:photos/module/metadata/video.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/file_magic_service.dart";
+import "package:photos/ui/settings/debug/ml_detection_debug_page.dart";
 import 'package:photos/ui/viewer/file/file_caption_widget.dart';
 import "package:photos/ui/viewer/file_details/added_by_widget.dart";
 import "package:photos/ui/viewer/file_details/albums_item_widget.dart";
@@ -227,6 +228,17 @@ class _FileDetailsWidgetState extends State<FileDetailsWidget> {
       fileDetailsTiles.addAll([
         MenuGroupComponent(
           items: [
+            if (mlDetectionDiagnosticsEnabled)
+              MenuComponent(
+                title: "ML detections (test build)",
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => MLDetectionDebugPage(file: file),
+                    ),
+                  );
+                },
+              ),
             if (hasPreview)
               PreviewPropertiesItemWidget(
                 file,

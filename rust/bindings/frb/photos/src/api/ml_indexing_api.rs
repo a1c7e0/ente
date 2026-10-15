@@ -268,6 +268,31 @@ pub async fn preload_ml_models(
     progress: StreamSink<ModelDownloadEvent>,
 ) {
     let store = AssetStore::new(&assets_dir);
+    let (selected, labels) =
+        mobile_download_assets(run_faces, run_clip, run_pets, include_clip_text);
+    if let Err(error) =
+        assets::ensure_mobile_models(&store, Path::new(&assets_dir), &selected, |update| {
+            let _ = progress.add(ModelDownloadEvent::Progress {
+                model: labels[update.asset_index].to_string(),
+                downloaded_bytes: update.asset_progress.downloaded_bytes,
+                total_bytes: update.asset_progress.total_bytes,
+            });
+        })
+        .await
+    {
+        let _ = progress.add(ModelDownloadEvent::Failed {
+            error: error.into(),
+        });
+    }
+}
+
+#[cfg(any(feature = "flutter", frb_expand, test))]
+fn mobile_download_assets(
+    run_faces: bool,
+    run_clip: bool,
+    run_pets: bool,
+    include_clip_text: bool,
+) -> (Vec<ente_assets::Asset>, Vec<&'static str>) {
     let mut selected = assets::indexing_assets(run_faces, run_clip, run_pets);
     let mut labels = Vec::new();
     if run_faces {
@@ -286,24 +311,26 @@ pub async fn preload_ml_models(
             "pet-body-embedding-cat",
         ]);
     }
+    // Human body indexing accompanies face indexing. The detector is also used
+    // by pets; retain one download and one progress row for that shared asset.
+    if run_faces {
+        for (asset, label) in ente_ml::body::model_assets()
+            .into_iter()
+            .zip(["body-detection", "body-embedding"])
+        {
+            if let Some(index) = selected.iter().position(|existing| *existing == asset) {
+                labels[index] = label;
+            } else {
+                selected.push(asset);
+                labels.push(label);
+            }
+        }
+    }
     if include_clip_text {
         selected.push(assets::clip_text_asset());
         labels.push("clip-text");
     }
-    if let Err(error) =
-        assets::ensure_mobile_models(&store, Path::new(&assets_dir), &selected, |update| {
-            let _ = progress.add(ModelDownloadEvent::Progress {
-                model: labels[update.asset_index].to_string(),
-                downloaded_bytes: update.asset_progress.downloaded_bytes,
-                total_bytes: update.asset_progress.total_bytes,
-            });
-        })
-        .await
-    {
-        let _ = progress.add(ModelDownloadEvent::Failed {
-            error: error.into(),
-        });
-    }
+    (selected, labels)
 }
 
 pub fn is_clip_text_downloaded(assets_dir: String, include_vocab: bool) -> bool {
@@ -468,6 +495,31 @@ fn to_api_pet_body_result(result: types::PetBodyResult) -> RustPetBodyResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mobile_downloads_include_bodies_and_deduplicate_the_pet_detector() {
+        for faces in [false, true] {
+            for clip in [false, true] {
+                for pets in [false, true] {
+                    for text in [false, true] {
+                        let (selected, labels) = mobile_download_assets(faces, clip, pets, text);
+                        assert_eq!(selected.len(), labels.len());
+                        for (index, asset) in selected.iter().enumerate() {
+                            assert!(!selected[..index].contains(asset));
+                        }
+                        assert_eq!(labels.contains(&"body-detection"), faces);
+                        assert_eq!(labels.contains(&"body-embedding"), faces);
+                        assert_eq!(labels.contains(&"clip-text"), text);
+                        for asset in ente_ml::body::model_assets() {
+                            if faces {
+                                assert!(selected.contains(&asset));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn network_and_http_download_failures_keep_their_classification() {
