@@ -35,6 +35,10 @@ class BodyRecognitionService {
       imagePath: path,
       assetsDir: await MLModelDownloadService.instance.getAssetsDirectory(),
     );
+    return fromRust(result, faces);
+  }
+
+  static BodyIndex fromRust(rust.RustBodyIndex result, List<Face> faces) {
     final usedFaces = <String>{};
     final bodies = <BodyDetection>[];
     for (final body in result.detections) {

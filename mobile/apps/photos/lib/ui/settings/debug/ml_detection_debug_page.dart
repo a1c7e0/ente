@@ -9,12 +9,14 @@ import "package:photos/db/ml/db.dart";
 import "package:photos/db/offline_files_db.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
+import "package:photos/models/ml/face/box.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
 import "package:photos/services/machine_learning/ml_process_lock.dart";
 import "package:photos/services/machine_learning/webgpu_execution_policy.dart";
+import "package:photos/src/rust/api/ml_indexing_api.dart" as rust;
 import "package:photos/ui/settings/debug/ml_detection_preview.dart";
 import "package:photos/utils/ml_util.dart";
 
@@ -37,6 +39,7 @@ class _MLDetectionDebugPageState extends State<MLDetectionDebugPage> {
   int? _fileKey;
   List<Face> _faces = [];
   BodyIndex? _body;
+  List<rust.RustBodyDetection>? _rawBodies;
   bool _faceIndexPresent = false;
   bool _showFaces = true;
   bool _showBodies = true;
@@ -152,16 +155,19 @@ class _MLDetectionDebugPageState extends State<MLDetectionDebugPage> {
           final faces = (result.faces ?? []).map((face) {
             return Face.fromFaceResult(face, key, result.decodedImageSize);
           }).toList();
-          final body = await BodyRecognitionService.instance.analyze(
-            key,
-            _path!,
-            faces,
+          final raw = await rust.analyzeBodiesRust(
+            fileId: key,
+            imagePath: _path!,
+            assetsDir: await MLModelDownloadService.instance
+                .getAssetsDirectory(),
           );
+          final body = BodyRecognitionService.fromRust(raw, faces);
           if (!mounted) return;
           setState(() {
             _faces = faces;
             _faceIndexPresent = true;
             _body = body;
+            _rawBodies = raw.detections;
             _source = "Trial: ${watch.elapsedMilliseconds} ms (not saved)";
           });
         },
@@ -206,9 +212,18 @@ class _MLDetectionDebugPageState extends State<MLDetectionDebugPage> {
                       "Face: ${_faceIndexPresent ? _faces.length : "not indexed"} · "
                       "Body: ${_body == null ? "not indexed" : bodies.length}",
                     ),
+                    if (_rawBodies != null)
+                      Text(
+                        "${_rawBodies!.length} raw body detections; "
+                        "${_rawBodies!.length - bodies.length} excluded "
+                        "by face association",
+                      ),
                     const Text(
                       "Green: face · Orange: body · *: linked to a face",
                     ),
+                    if (_rawBodies != null &&
+                        _rawBodies!.length > bodies.length)
+                      const Text("Red: detected, excluded from the body index"),
                     const Text("Body embedding: $bodyModel"),
                     if (_busy) ...[
                       const LinearProgressIndicator(),
@@ -260,6 +275,19 @@ class _MLDetectionDebugPageState extends State<MLDetectionDebugPage> {
                     imageSize: _imageSize!,
                     image: Image.file(File(_path!), fit: BoxFit.fill),
                     boxes: [
+                      if (_showBodies && _rawBodies != null)
+                        for (final body in _rawBodies!)
+                          if (!bodies.any((d) => d.bodyID == body.bodyId))
+                            MLDebugBox(
+                              FaceBox(
+                                x: body.boxXyxy[0],
+                                y: body.boxXyxy[1],
+                                width: body.boxXyxy[2] - body.boxXyxy[0],
+                                height: body.boxXyxy[3] - body.boxXyxy[1],
+                              ),
+                              "Excluded ${body.score.toStringAsFixed(2)}",
+                              Colors.redAccent,
+                            ),
                       if (_showBodies)
                         for (final (i, body) in bodies.indexed)
                           MLDebugBox(
