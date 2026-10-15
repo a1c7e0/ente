@@ -1,4 +1,4 @@
-//! Print face/body boxes from the production Rust pipelines without saving ML data.
+// Print face/body boxes from the production Rust pipelines without saving ML data.
 #[expect(dead_code, reason = "Only the shared runtime loader is needed here")]
 #[path = "../tests/support/mod.rs"]
 mod support;

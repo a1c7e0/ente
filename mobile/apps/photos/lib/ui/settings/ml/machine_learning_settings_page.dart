@@ -351,22 +351,7 @@ class _ModelLoadingStateState extends State<ModelLoadingState> {
   }
 
   void _recordProgress(String model, int downloaded, int total) {
-    final title = switch (model) {
-      "clip-image" => "Image Model",
-      "clip-text" => "Text Model",
-      "face-detection" => "Face Detection Model",
-      "face-embedding" => "Face Embedding Model",
-      "body-detection" => "Body Detection Model",
-      "body-embedding" => "Body Embedding Model",
-      "pet-face-detection" => "Pet Face Detection Model",
-      "pet-body-detection" => "Pet Body Detection Model",
-      "pet-face-embedding-dog" => "Dog Face Embedding Model",
-      "pet-face-embedding-cat" => "Cat Face Embedding Model",
-      "pet-body-embedding-dog" => "Dog Body Embedding Model",
-      "pet-body-embedding-cat" => "Cat Body Embedding Model",
-      _ => model,
-    };
-    _progressMap[title] = (downloaded, total);
+    _progressMap[model] = (downloaded, total);
   }
 
   @override
@@ -419,23 +404,61 @@ class _ModelLoadingStateState extends State<ModelLoadingState> {
         ..._progressMap.entries.map((entry) {
           return Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: MenuComponent(
+            child: ModelDownloadProgressRow(
               key: ValueKey(entry.key),
-              title: entry.key,
-              leading: const HugeIcon(
-                icon: HugeIcons.strokeRoundedCloudDownload,
-                size: IconSizes.small,
-              ),
-              trailing: entry.value.$2 <= 0
-                  ? EnteLoadingWidget(size: 12, color: colors.fillDark)
-                  : Text(
-                      '${(entry.value.$1 * 100) ~/ entry.value.$2}%',
-                      style: TextStyles.mini.copyWith(color: colors.textLight),
-                    ),
+              model: entry.key,
+              downloaded: entry.value.$1,
+              total: entry.value.$2,
             ),
           );
         }),
       ],
+    );
+  }
+}
+
+class ModelDownloadProgressRow extends StatelessWidget {
+  final String model;
+  final int downloaded;
+  final int total;
+
+  const ModelDownloadProgressRow({
+    required this.model,
+    required this.downloaded,
+    required this.total,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.componentColors;
+    final title = switch (model) {
+      "clip-image" => "Image Model",
+      "clip-text" => "Text Model",
+      "face-detection" => "Face Detection Model",
+      "face-embedding" => "Face Embedding Model",
+      "body-detection" => "Body Detection Model",
+      "body-embedding" => "Body Embedding Model",
+      "pet-face-detection" => "Pet Face Detection Model",
+      "pet-body-detection" => "Pet Body Detection Model",
+      "pet-face-embedding-dog" => "Dog Face Embedding Model",
+      "pet-face-embedding-cat" => "Cat Face Embedding Model",
+      "pet-body-embedding-dog" => "Dog Body Embedding Model",
+      "pet-body-embedding-cat" => "Cat Body Embedding Model",
+      _ => model,
+    };
+    return MenuComponent(
+      title: title,
+      leading: const HugeIcon(
+        icon: HugeIcons.strokeRoundedCloudDownload,
+        size: IconSizes.small,
+      ),
+      trailing: total <= 0
+          ? EnteLoadingWidget(size: 12, color: colors.fillDark)
+          : Text(
+              '${(downloaded * 100 ~/ total).clamp(0, 100)}%',
+              style: TextStyles.mini.copyWith(color: colors.textLight),
+            ),
     );
   }
 }
