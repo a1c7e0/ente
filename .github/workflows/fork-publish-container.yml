@@ -78,20 +78,26 @@ jobs:
                       "${CONTAINER_IMAGE}:${GITHUB_SHA}-${ARCH}" \
                       -c 'test -x /museum && test -d /migrations && test -d /configurations'
 
-            - name: Verify Photos Web serves HTTP
-              if: inputs.image == 'photos-web'
+            - name: Verify all Web apps serve HTTP
+              if: inputs.image == 'web'
               env:
                   ARCH: ${{ matrix.arch }}
               run: |
-                  docker run --detach --name photos-web-test \
-                      --publish 127.0.0.1:3000:3000 \
+                  ports=(3000 3001 3002 3003 3004 3005 3006 3008 3009 3010)
+                  publish=()
+                  for port in "${ports[@]}"; do
+                      publish+=(--publish "127.0.0.1:${port}:${port}")
+                  done
+                  docker run --detach --name web-test "${publish[@]}" \
                       --env ENTE_API_ORIGIN=https://museum.example.test \
                       "${CONTAINER_IMAGE}:${GITHUB_SHA}-${ARCH}"
-                  trap 'docker logs photos-web-test; docker rm --force photos-web-test' EXIT
-                  curl --retry 10 --retry-all-errors --retry-delay 1 --fail \
-                      http://127.0.0.1:3000/ --output /dev/null
-                  docker exec photos-web-test sh -c \
-                      '! grep -rl ENTE_API_ORIGIN_PLACEHOLDER /out/photos --include="*.js" && grep -rl https://museum.example.test /out/photos --include="*.js" >/dev/null'
+                  trap 'docker logs web-test; docker rm --force web-test' EXIT
+                  for port in "${ports[@]}"; do
+                      curl --retry 10 --retry-all-errors --retry-delay 1 --fail \
+                          "http://127.0.0.1:${port}/" --output /dev/null
+                  done
+                  docker exec web-test sh -c \
+                      '! grep -rl ENTE_API_ORIGIN_PLACEHOLDER /out --include="*.js" && grep -rl https://museum.example.test /out --include="*.js" >/dev/null'
 
     publish:
         needs: build

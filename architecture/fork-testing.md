@@ -10,7 +10,7 @@ After a successful build, this fork publishes:
 
 ```sh
 docker pull ghcr.io/a1c7e0/server:latest
-docker pull ghcr.io/a1c7e0/photos-web:latest
+docker pull ghcr.io/a1c7e0/web:latest
 ```
 
 Both images support `linux/amd64` and `linux/arm64`. Each architecture builds and
@@ -22,19 +22,37 @@ Use the Server image with the existing [self-hosting configuration](../server/RU
 including PostgreSQL and object storage. Replacing the image does not replace
 those services or their configuration.
 
-The Photos Web image serves Photos on port 3000. Set `ENTE_API_ORIGIN` to an API
+The Web image includes the same applications as upstream's default Docker image:
+
+| Application | Port |
+| --- | --- |
+| Photos | 3000 |
+| Accounts | 3001 |
+| Albums | 3002 |
+| Auth | 3003 |
+| Cast | 3004 |
+| Share | 3005 |
+| Embed | 3006 |
+| Paste | 3008 |
+| Locker | 3009 |
+| Memories | 3010 |
+
+Set `ENTE_API_ORIGIN` to an API
 URL reachable from the browser, for example:
 
 ```sh
 docker run --rm -p 3000:3000 \
     -e ENTE_API_ORIGIN=http://localhost:8080 \
-    ghcr.io/a1c7e0/photos-web:latest
+    ghcr.io/a1c7e0/web:latest
 ```
 
 For another device, use the server's reachable address instead of `localhost`.
 The image retains upstream's runtime endpoint substitution. The default
 `web/Dockerfile` target still builds all upstream Web apps; `--target photos`
-builds only Photos.
+builds only Photos. The fork's Web publisher uses the full `all` target. The old
+`photos-web` package remains available as a historical Photos-only image and is
+no longer updated by this workflow. Publish the additional ports you need when
+running the full image.
 
 These workflows use persistent GitHub Actions BuildKit layer caches, separated
 by image and architecture. Cache export includes intermediate stages. The first
