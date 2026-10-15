@@ -47,12 +47,10 @@ docker run --rm -p 3000:3000 \
 ```
 
 For another device, use the server's reachable address instead of `localhost`.
-The image retains upstream's runtime endpoint substitution. The default
-`web/Dockerfile` target still builds all upstream Web apps; `--target photos`
-builds only Photos. The fork's Web publisher uses the full `all` target. The old
-`photos-web` package remains available as a historical Photos-only image and is
-no longer updated by this workflow. Publish the additional ports you need when
-running the full image.
+The image retains upstream's Dockerfile and runtime endpoint substitution. The
+Web publisher builds all applications in that Dockerfile. The retired
+Photos-only package and Docker target have been removed. Publish the additional
+ports you need when running the full image.
 
 These workflows use persistent GitHub Actions BuildKit layer caches, separated
 by image and architecture. Cache export includes intermediate stages. The first
@@ -60,6 +58,32 @@ build is cold, and GitHub may evict caches. BuildKit cache mounts inside a
 Dockerfile, such as the Server's Go compiler cache, are not exported by this
 configuration. The Android APK workflow currently caches the Flutter SDK, but
 does not persist Gradle or Rust compilation outputs between its builds.
+
+## Server replacement and client compatibility
+
+At upstream snapshot `4f6bf54b4e`, this fork's `server/` tree is identical to
+upstream. Body recognition adds client-side processing and an encrypted mldata
+subtype, not a new server API or SQL column. Using these clients with an official
+server does not require deploying the fork Server image. Official clients can
+use this server through their existing self-hosting endpoint configuration, but
+do not implement body inference or body review.
+
+Changing a self-hosted Server image is a normal upstream upgrade: retain the
+existing PostgreSQL database, object storage, configuration and keys. Back up
+the database before upgrading an older deployment because Museum applies its
+included SQL migrations at startup. The fork's main snapshot need not equal the
+commit used by the official production image.
+
+Accounts belong to their server; an official-cloud account does not become an
+account on an independent self-hosted installation. Current upstream clients
+preserve unknown top-level mldata fields on normal writes, but legacy writers
+and concurrent stale writes do not provide a universal preservation guarantee.
+These compatibility findings are based on code and protocol inspection, not
+device testing against an official-cloud account.
+
+The fork's container workflows publish images to GHCR; they do not deploy them
+to a running server. Historical GitHub deployment records from disabled upstream
+deployment workflows do not need to be enabled to use these images.
 
 ## Body recognition testing
 

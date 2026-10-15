@@ -12,9 +12,6 @@ on:
             dockerfile:
                 type: string
                 required: true
-            target:
-                type: string
-                default: ''
 
 permissions:
     contents: read
@@ -58,7 +55,6 @@ jobs:
               with:
                   context: ${{ inputs.context }}
                   file: ${{ inputs.dockerfile }}
-                  target: ${{ inputs.target }}
                   platforms: linux/${{ matrix.arch }}
                   push: true
                   tags: ${{ env.CONTAINER_IMAGE }}:${{ github.sha }}-${{ matrix.arch }}

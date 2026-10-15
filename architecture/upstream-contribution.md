@@ -52,8 +52,9 @@ Include the relevant final changes in `desktop/`, `mobile/`, `rust/`, `web/`, an
 Regenerate bindings using upstream's code-generation commands when required.
 
 Exclude the fork container publisher, changes to Server/Web GHCR workflows,
-`web/Dockerfile` targets added for this fork, `architecture/fork-testing.md`, and
-this preparation guide. APK test-builder changes live on the separate
+`architecture/fork-testing.md`, and this preparation guide. `web/Dockerfile`
+has been restored to upstream's original full-image definition. APK test-builder
+changes live on the separate
 `build/photos-arm64-test` branch and should also stay out of a contribution.
 Repository Actions settings, caches, GHCR packages and releases are not Git
 changes and are not transferred by creating a new branch.
