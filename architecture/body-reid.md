@@ -229,6 +229,11 @@ body-only reduction of the face crop's generous padding could improve subject
 size within each tile, but should be compared visually before changing the crop
 primitive. A new review screen or different button workflow is unnecessary.
 
+A host-side synthetic review benchmark used 7,877 one-detection indexes with
+the measured vectors (29.3 MB of JSON). Building the previous full review cache
+key with `JSON.stringify` took 248 ms median and 262 ms p95 on this host. This
+is not an Android timing; it shows the repeated work the revision cache removes.
+
 ## Review
 
 The existing Mobile suggestion views and Desktop person review dialog render
