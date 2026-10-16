@@ -20,6 +20,8 @@ jobs:
             ML_DIAGNOSTICS: ${{ github.ref == 'refs/heads/feat/ml-lab' }}
             CARGO_BUILD_JOBS: 2
             CARGO_INCREMENTAL: 0
+            CARGO_PROFILE_DEV_DEBUG: 0
+            CARGO_PROFILE_TEST_DEBUG: 0
             SIGNING_KEY_ALIAS: photos-test
             SIGNING_KEY_PASSWORD: android
             SIGNING_STORE_PASSWORD: android
@@ -35,6 +37,12 @@ jobs:
               with:
                   distribution: temurin
                   java-version: "17"
+                  cache: gradle
+                  cache-dependency-path: |
+                      mobile/apps/photos/android/**/*.gradle*
+                      mobile/apps/photos/android/gradle/wrapper/gradle-wrapper.properties
+                      mobile/gradle/**
+                      mobile/pubspec.lock
 
             - name: Setup Flutter
               uses: ./.github/actions/setup-flutter
@@ -48,6 +56,47 @@ jobs:
                   sdkmanager_path="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -n 1)"
                   test -n "$sdkmanager_path"
                   "$sdkmanager_path" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
+
+            - name: Restore Dart packages
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  key: photos-pub-${{ runner.os }}-${{ hashFiles('mobile/pubspec.lock') }}
+                  restore-keys: photos-pub-${{ runner.os }}-
+                  path: |
+                      ~/.pub-cache/hosted
+                      ~/.pub-cache/git
+
+            - name: Cache Rust dependencies
+              uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+              with:
+                  workspaces: rust
+                  shared-key: photos-apk-${{ env.APK_CHANNEL }}
+                  cache-targets: false
+
+            - name: Identify Rust build cache
+              id: rust-build-key
+              shell: bash
+              env:
+                  BUILD_INPUTS: ${{ hashFiles('rust/**/Cargo.toml', 'rust/Cargo.lock', 'mobile/pubspec.lock', 'mobile/cargokit/**', 'mobile/apps/photos/android/**/*.gradle*', 'mobile/gradle/**', '.github/workflows/fork-photos-apk.yml', '.github/actions/setup-flutter/action.yml') }}
+              run: |
+                  compiler="$(rustc -vV | sha256sum | cut -d ' ' -f 1)"
+                  echo "prefix=photos-rust-v1-${APK_CHANNEL}-${ImageOS}-${ImageVersion}-${compiler}-${BUILD_INPUTS}" >> "$GITHUB_OUTPUT"
+
+            - name: Restore Rust build outputs
+              id: rust-build-cache
+              uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  key: ${{ steps.rust-build-key.outputs.prefix }}-${{ github.sha }}
+                  restore-keys: ${{ steps.rust-build-key.outputs.prefix }}-
+                  path: |
+                      rust/target
+                      mobile/apps/photos/build/ente_photos_frb/build
+
+            # Reuse upstream's content-aware timestamp restoration so an unchanged
+            # checkout does not invalidate Cargo's restored compilation artifacts.
+            - name: Restore Rust source timestamps
+              if: steps.rust-build-cache.outputs.cache-matched-key != ''
+              run: node .github/actions/restore-rust-target/mtimes.mjs restore
 
             - name: Resolve locked Photos dependencies
               working-directory: mobile/apps/photos
@@ -71,9 +120,6 @@ jobs:
             - name: Verify mobile model download selection
               if: github.ref == 'refs/heads/feat/ml-lab'
               working-directory: rust
-              env:
-                  CARGO_PROFILE_DEV_DEBUG: 0
-                  CARGO_PROFILE_TEST_DEBUG: 0
               run: cargo test --locked -p ente-photos-frb --lib mobile_downloads_include_bodies_and_deduplicate_the_pet_detector
 
             - name: Prepare development signature and arm64 packaging
@@ -138,6 +184,19 @@ jobs:
                       assert 'lib/arm64-v8a/libente_photos_frb.so' in libraries
                       assert 'lib/arm64-v8a/libonnxruntime.so' in libraries
                   PYTHON
+
+            - name: Record Rust source timestamps
+              if: steps.rust-build-cache.outputs.cache-hit != 'true'
+              run: node .github/actions/restore-rust-target/mtimes.mjs save
+
+            - name: Save Rust build outputs
+              if: steps.rust-build-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  key: ${{ steps.rust-build-cache.outputs.cache-primary-key }}
+                  path: |
+                      rust/target
+                      mobile/apps/photos/build/ente_photos_frb/build
 
             - name: Upload APK
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
