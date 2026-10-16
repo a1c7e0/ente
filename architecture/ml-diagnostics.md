@@ -42,7 +42,7 @@ subscribes. Unknown download sizes show activity instead of a percentage.
 
 ## Building
 
-Use the fork's path-filtered Photos APK workflow on `feat/ml-lab` for the ML Lab
+Use the fork's manual Photos APK workflow on `feat/ml-lab` for the ML Lab
 artifact; choose that branch explicitly for a manual workflow run. It publishes
 the `photos-ml-lab-test` prerelease, while `main` publishes
 `photos-main-test`. The Lab package ID is `io.ente.photos.dev.debug`; the main
@@ -52,7 +52,7 @@ install them as updates. Building or uploading an APK does not install it.
 
 The Linux x86_64 Android toolchain cross-compiles arm64 machine code; it does
 not execute an emulated ARM Android system. Upstream's Photos build workflow
-and the fork's path-filtered APK workflow are separate workflows with separate
+and the fork's manual APK workflow are separate workflows with separate
 triggers. Disable the upstream workflow in this fork's Actions settings to
 avoid duplicate release and nightly runs. A run of either workflow builds an
 artifact; it does not deploy to a device or replace another installed app.

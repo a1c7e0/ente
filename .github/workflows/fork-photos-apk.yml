@@ -1,16 +1,6 @@
 name: "Build fork Photos APK"
 
 on:
-    push:
-        branches: [main, feat/ml-lab]
-        paths:
-            - '.github/workflows/fork-photos-apk.yml'
-            - '.github/actions/setup-flutter/**'
-            - 'mobile/apps/photos/**'
-            - 'mobile/packages/**'
-            - 'mobile/pubspec.*'
-            - 'mobile/analysis_options.yaml'
-            - 'rust/**'
     workflow_dispatch:
 
 permissions:

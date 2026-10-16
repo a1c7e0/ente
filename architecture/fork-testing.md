@@ -11,7 +11,7 @@
 
 Image names use the `ghcr.io/a1c7e0/` prefix. Pull `:latest` for the current successful main build or use a commit-SHA tag for a fixed version. Workflow runs publish artifacts; they do not deploy to a running installation.
 
-The dedicated fork Photos APK workflow is path filtered on both branches and can also be run manually with either branch selected. It uploads branch-specific artifacts and refreshes the `photos-main-test` or `photos-ml-lab-test` prerelease. The ML Lab APK uses `io.ente.photos.dev.debug`; the main test APK uses `io.ente.photos.dev`. The fork APKs have a temporary CI signature. To install successive builds as updates, re-sign them with the same persistent local development key. The upstream Photos build workflow is separate and should be disabled in this fork's Actions settings to avoid duplicate nightly/release runs. A workflow run builds and publishes artifacts; installing an APK or replacing a container is a separate operator action.
+The dedicated fork Photos APK workflow runs only by manual dispatch, with either branch selected. Pushes do not trigger APK builds. It uploads branch-specific artifacts and refreshes the `photos-main-test` or `photos-ml-lab-test` prerelease. The ML Lab APK uses `io.ente.photos.dev.debug`; the main test APK uses `io.ente.photos.dev`. The fork APKs have a temporary CI signature. To install successive builds as updates, re-sign them with the same persistent local development key. The upstream Photos build workflow is separate and should be disabled in this fork's Actions settings to avoid duplicate nightly/release runs. A workflow run builds and publishes artifacts; installing an APK or replacing a container is a separate operator action.
 
 Container images support `linux/amd64` and `linux/arm64`. Each architecture builds and runs smoke checks on a native runner; the multi-platform commit tag is published after both pass. Use the Server image with the existing [self-hosting configuration](../server/RUNNING.md), PostgreSQL, and object storage. Replacing the image does not replace those services or their configuration. The Web image includes upstream's applications on ports 3000–3010 (with 3007 omitted); set `ENTE_API_ORIGIN` to an API URL reachable from the browser. For example:
 
@@ -27,9 +27,9 @@ Publish any additional application ports you need. The Web image retains upstrea
 
 - Server watches `server/**`, its publishing YAML, and the shared container workflow.
 - Web watches `web/**`, `rust/**`, `.dockerignore`, its publishing YAML, and the shared container workflow. Rust is a shared build input for WebAssembly.
-- APK watches `mobile/apps/photos/**`, `mobile/packages/**`, the mobile workspace manifest/lockfile and analysis options, `rust/**`, Flutter setup, and its own workflow.
+- APK builds are manual-only because native builds are slow; they do not watch pushes or schedules.
 
-Container workflows filter pushes to `main`; the APK workflow filters both `main` and `feat/ml-lab`. Documentation-only commits do not trigger builds. Manual APK dispatch bypasses path filtering and uses the selected branch; container dispatch is restricted to main. Check the workflow's `paths` for the authoritative list.
+Container workflows filter pushes to `main`; documentation-only commits do not trigger builds. APK dispatch uses the selected branch, `main` or `feat/ml-lab`; container dispatch is restricted to main. Check the workflow's `paths` for the authoritative list.
 
 The upstream `server-publish-ghcr.yml` and `web-publish-ghcr.yml` remain the entry points. Their fork job calls `fork-publish-container.yml`, a reusable workflow added by this fork. It builds natively on amd64 and arm64, checks the images, then publishes their combined manifest. Fork jobs skip upstream schedules and official production-commit lookup. The upstream `photos-build.yml` is preserved unchanged but disabled in this fork; `fork-photos-apk.yml` builds the fork's two APK channels. GitHub Actions is the execution platform, a workflow is a YAML process, and an Action such as `actions/checkout` is one reusable step within that process.
 

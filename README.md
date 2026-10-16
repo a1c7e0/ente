@@ -14,7 +14,7 @@ This monorepo contains all our source code - the client apps (iOS / Android / F-
 
 ### Fork development
 
-This fork adds client-side OSNet-AIN x1.0 body recognition to mobile and desktop Photos, with body grouping and review integrated into the existing people workflow. It keeps stable integration on `main`; ML Lab diagnostics and reset tools are developed on `feat/ml-lab`. The two branches have separate, path-filtered Photos APK builds; Server and full Web images are published from `main` only. See [fork testing and builds](architecture/fork-testing.md) and the [ML Lab guide](architecture/ml-lab.md).
+This fork adds client-side OSNet-AIN x1.0 body recognition to mobile and desktop Photos, with body grouping and review integrated into the existing people workflow. It keeps stable integration on `main`; ML Lab diagnostics and reset tools are developed on `feat/ml-lab`. The two branches have separate, manually triggered Photos APK builds; Server and full Web images are published from `main` only. See [fork testing and builds](architecture/fork-testing.md) and the [ML Lab guide](architecture/ml-lab.md).
 
 Our source code and cryptography have been externally audited by Cure53 (a German cybersecurity firm, arguably the world's best), Symbolic Software (French cryptography experts) and Fallible (an Indian penetration testing firm).
 
