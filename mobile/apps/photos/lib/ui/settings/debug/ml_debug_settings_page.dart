@@ -858,6 +858,9 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
               }
               final disposition = await MLService.instance.runAllML(
                 force: true,
+                bodyReindexFileIDs: {
+                  for (final item in targets) item.file.uploadedFileID!,
+                },
               );
               if (disposition != MlRunDisposition.completed) {
                 throw StateError(

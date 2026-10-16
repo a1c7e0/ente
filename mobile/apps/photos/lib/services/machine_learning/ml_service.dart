@@ -346,6 +346,7 @@ class MLService {
     int? maxFilesToIndex,
     MlRunControl? control,
     Duration? lockWait,
+    Set<int> bodyReindexFileIDs = const {},
   }) async {
     final runControl = control ?? MlRunControl();
     // A latched stop always wins, force included.
@@ -398,6 +399,7 @@ class MLService {
             remoteSyncOnly: remoteSyncOnly,
             allowImageIndexing: allowImageIndexing,
             maxFilesToIndex: maxFilesToIndex,
+            bodyReindexFileIDs: bodyReindexFileIDs,
             control: runControl,
           );
         },
@@ -441,6 +443,7 @@ class MLService {
     required bool remoteSyncOnly,
     required bool allowImageIndexing,
     required int? maxFilesToIndex,
+    required Set<int> bodyReindexFileIDs,
     required MlRunControl control,
   }) async {
     assert(MlProcessLock.instance.isBusy, "ml funnel must be held");
@@ -498,6 +501,7 @@ class MLService {
           control: control,
           allowImageIndexing: allowImageIndexing,
           maxFilesToIndex: maxFilesToIndex,
+          bodyReindexFileIDs: bodyReindexFileIDs,
         );
       }
       if (control.stopRequested) {
@@ -617,6 +621,7 @@ class MLService {
     required MlRunControl control,
     bool allowImageIndexing = true,
     int? maxFilesToIndex,
+    Set<int> bodyReindexFileIDs = const {},
   }) async {
     assert(MlProcessLock.instance.isBusy, "ml funnel must be held");
     if (control.stopRequested) {
@@ -639,6 +644,7 @@ class MLService {
             fileDownloadMlLimit,
             mode: mode,
             control: control,
+            bodyReindexFileIDs: bodyReindexFileIDs,
           );
 
       int fileAttemptCount = 0;

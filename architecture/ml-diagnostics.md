@@ -1,15 +1,16 @@
 # Mobile ML detection diagnostics
 
-This testing work lives on `dev/ml-detection-inspector`. It does not enable
-internal-user features or change review, grouping, historical indexing, or
-anonymous-mode account requirements.
+ML Lab diagnostics are developed on `feat/ml-lab`; `main` remains the stable
+personal integration branch. The diagnostic page inspects existing indexes and
+offers an unsaved one-photo inference run. It does not change normal review,
+grouping, indexing scope, or anonymous-mode account requirements. See the
+[ML Lab guide](ml-lab.md) for using its reset controls and web metadata behavior.
 
 ## On a phone
 
 The diagnostic APK is named **Ente ML Lab**, with package ID
 `io.ente.photos.dev.debug`, using upstream's registered development-debug
-client configuration. It installs alongside the previous Ente Dev APK
-and official Photos. Android keeps each application's local database separate;
+client configuration. It installs alongside official Photos. Android keeps each application's local database separate;
 the Lab cannot read another application's local-only ML data. Account-backed
 metadata can be received through the normal encrypted sync flow.
 
@@ -41,18 +42,20 @@ subscribes. Unknown download sizes show activity instead of a percentage.
 
 ## Building
 
-The branch's manual Photos workflow builds only an arm64 Android APK, runs
-Photos analysis and the diagnostic/body regression tests, and verifies model
-download selection. Its temporary CI signature is an intermediate build
-signature. The delivery APK is re-signed with the persistent local development
-keystore, outside Git, so subsequent delivery builds can use the same identity.
-Do not use the raw CI candidate to update a delivery APK. The old Ente Dev APK's
-temporary signing key was not retained; do not uninstall it to install the Lab.
+Use the fork's manual Photos APK workflow on `feat/ml-lab` for the ML Lab
+artifact; choose that branch explicitly for a manual workflow run. It publishes
+the `photos-ml-lab-test` prerelease, while `main` publishes
+`photos-main-test`. The Lab package ID is `io.ente.photos.dev.debug`; the main
+test APK uses `io.ente.photos.dev`. Both use a temporary CI signature. Re-sign
+successive delivery builds with the same persistent local development key to
+install them as updates. Building or uploading an APK does not install it.
 
-The build uses the supported Linux x86_64 Android toolchain to cross-compile
-arm64 machine code. It does not execute an emulated ARM Android system. The
-Photos workflow is kept disabled on the default branch between manual tests to
-avoid activating upstream nightly/release automation.
+The Linux x86_64 Android toolchain cross-compiles arm64 machine code; it does
+not execute an emulated ARM Android system. Upstream's Photos build workflow
+and the fork's manual APK workflow are separate workflows with separate
+triggers. Disable the upstream workflow in this fork's Actions settings to
+avoid duplicate release and nightly runs. A run of either workflow builds an
+artifact; it does not deploy to a device or replace another installed app.
 
 ## Host-side inference checks
 
