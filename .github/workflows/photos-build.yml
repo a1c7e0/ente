@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
     build:
-        if: github.repository == 'a1c7e0/ente' && github.ref == 'refs/heads/dev/ml-detection-inspector'
+        if: github.repository == 'a1c7e0/ente' && (github.ref == 'refs/heads/dev/ml-detection-inspector' || github.ref == 'refs/heads/feat/body-unnamed-and-bounded-chains')
         runs-on: ubuntu-24.04
         timeout-minutes: 90
         env:
@@ -110,6 +110,25 @@ jobs:
                   cd artifacts
                   sha256sum ente-photos-ml-diagnostics-arm64.apk > SHA256SUMS
 
+            - name: Verify locked dependencies
+              run: git diff --exit-code -- mobile/pubspec.lock
+
+            - name: Verify artifact
+              run: |
+                  "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs artifacts/ente-photos-ml-diagnostics-arm64.apk > artifacts/SIGNATURE.txt
+                  cat artifacts/SIGNATURE.txt
+                  "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 artifacts/ente-photos-ml-diagnostics-arm64.apk
+                  python3 - <<'PYTHON'
+                  import zipfile
+                  with zipfile.ZipFile('artifacts/ente-photos-ml-diagnostics-arm64.apk') as apk:
+                      assert apk.testzip() is None, 'APK ZIP integrity check failed'
+                      libraries = [p for p in apk.namelist() if p.startswith('lib/') and p.endswith('.so')]
+                      print('Native libraries:', libraries)
+                      assert {p.split('/')[1] for p in libraries} == {'arm64-v8a'}, libraries
+                      assert 'lib/arm64-v8a/libente_photos_frb.so' in libraries
+                      assert 'lib/arm64-v8a/libonnxruntime.so' in libraries
+                  PYTHON
+
             - name: Upload APK
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
@@ -117,19 +136,3 @@ jobs:
                   path: artifacts/
                   if-no-files-found: error
                   retention-days: 7
-
-            - name: Verify locked dependencies
-              run: git diff --exit-code -- mobile/pubspec.lock
-
-            - name: Verify artifact
-              run: |
-                  "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose artifacts/ente-photos-ml-diagnostics-arm64.apk
-                  python3 - <<'PYTHON'
-                  import zipfile
-                  with zipfile.ZipFile('artifacts/ente-photos-ml-diagnostics-arm64.apk') as apk:
-                      libraries = [p for p in apk.namelist() if p.startswith('lib/') and p.endswith('.so')]
-                      print('Native libraries:', libraries)
-                      assert {p.split('/')[1] for p in libraries} == {'arm64-v8a'}, libraries
-                      assert 'lib/arm64-v8a/libente_photos_frb.so' in libraries
-                      assert 'lib/arm64-v8a/libonnxruntime.so' in libraries
-                  PYTHON
