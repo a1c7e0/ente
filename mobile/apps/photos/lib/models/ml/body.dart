@@ -146,6 +146,22 @@ class BodyIndex {
   };
 }
 
+Map<String, dynamic> clearBodyReviewData(Map<String, dynamic> body) {
+  final cleaned = Map<String, dynamic>.from(body);
+  final detections = body["detections"];
+  if (detections is! List) return cleaned;
+
+  cleaned["detections"] = detections.map((detection) {
+    if (detection is! Map) return detection;
+    final cleanedDetection = Map<String, dynamic>.from(detection);
+    cleanedDetection.remove("groupID");
+    cleanedDetection.remove("rejectedAnchorFaceIDs");
+    cleanedDetection["decisions"] = <String, dynamic>{};
+    return cleanedDetection;
+  }).toList();
+  return cleaned;
+}
+
 double bodyCosine(List<double> a, List<double> b) {
   if (a.length != b.length || a.isEmpty) return -1;
   double dot = 0, aa = 0, bb = 0;

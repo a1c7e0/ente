@@ -138,6 +138,30 @@ void main() {
     expect(BodyIndex.tryParse(bad), isNull);
   });
 
+  test("body review reset keeps detection data and extension fields", () {
+    final bodyIndex = BodyIndex(1000, 1000, [body("body:1_1")]).toJson()
+      ..["extension"] = "preserved";
+    final detection = bodyIndex["detections"] as List;
+    detection[0] = {
+      ...(detection[0] as Map<String, dynamic>),
+      "groupID": "body-group:1_1",
+      "rejectedAnchorFaceIDs": ["1_face"],
+      "decisions": {
+        "person-a": {"status": "accepted"},
+      },
+      "futureField": 12,
+    };
+
+    final reset = clearBodyReviewData(bodyIndex);
+    final resetDetection = (reset["detections"] as List).single;
+    expect(reset["extension"], "preserved");
+    expect(resetDetection["decisions"], isEmpty);
+    expect(resetDetection.containsKey("groupID"), isFalse);
+    expect(resetDetection.containsKey("rejectedAnchorFaceIDs"), isFalse);
+    expect(resetDetection["futureField"], 12);
+    expect(BodyIndex.tryParse(reset)?.detections.single.embedding, vector());
+  });
+
   test("a prior confirmation prevents automatic reassignment", () {
     final candidate = body("body:2_1");
     candidate.decisions["removed-person"] = {"status": "accepted"};

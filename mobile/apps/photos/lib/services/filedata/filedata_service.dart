@@ -45,6 +45,10 @@ class FileDataService {
 
   Future<void> putFileData(EnteFile file, FileDataEntity data) async {
     data.validate();
+    await _putFileData(file, data);
+  }
+
+  Future<void> _putFileData(EnteFile file, FileDataEntity data) async {
     final ChaChaEncryptionResult encryptionResult = await gzipAndEncryptJson(
       data.remoteRawData,
       getFileKey(file),
@@ -70,6 +74,21 @@ class FileDataService {
     EnteFile file,
     FutureOr<bool> Function(FileDataEntity) update, {
     DataType type = DataType.mlData,
+  }) => _updateFileData(file, update, type: type);
+
+  // Resets sometimes need to write a partial (or empty) metadata map, which
+  // normal indexing deliberately rejects in FileDataEntity.validate().
+  Future<FileDataEntity> updateFileDataAllowingPartialMetadata(
+    EnteFile file,
+    FutureOr<bool> Function(FileDataEntity) update, {
+    DataType type = DataType.mlData,
+  }) => _updateFileData(file, update, type: type, allowPartialMetadata: true);
+
+  Future<FileDataEntity> _updateFileData(
+    EnteFile file,
+    FutureOr<bool> Function(FileDataEntity) update, {
+    required DataType type,
+    bool allowPartialMetadata = false,
   }) async {
     final fileID = file.uploadedFileID!;
     for (int attempt = 0; attempt < 3; attempt++) {
@@ -82,7 +101,11 @@ class FileDataService {
           (FileDataEntity.empty(fileID, type)..updatedAt = 0);
       if (!await update(entity)) return entity;
       try {
-        await putFileData(file, entity);
+        if (allowPartialMetadata) {
+          await _putFileData(file, entity);
+        } else {
+          await putFileData(file, entity);
+        }
         return entity;
       } on DioException catch (e) {
         if (e.response?.statusCode != 409 || attempt == 2) rethrow;

@@ -11,8 +11,11 @@ import "package:photos/db/ml/db.dart";
 import "package:photos/db/ml/rust_db.dart";
 import "package:photos/db/ml/usearch_clip_vector_db.dart";
 import "package:photos/events/people_changed_event.dart";
+import "package:photos/models/file/extensions/file_props.dart";
+import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_clustering_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_indexing_isolate.dart";
@@ -21,6 +24,7 @@ import "package:photos/services/machine_learning/ml_process_lock.dart";
 import "package:photos/services/machine_learning/ml_run_control.dart";
 import "package:photos/services/machine_learning/ml_service.dart";
 import "package:photos/services/machine_learning/semantic_search/semantic_search_service.dart";
+import "package:photos/services/search_service.dart";
 import "package:photos/src/rust/api/ml_db_api.dart" as rust;
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/components/menu_item_widget/menu_item_widget_new.dart";
@@ -53,6 +57,8 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
   late double _defaultClusteringDistance;
   late bool _persistAutoMergeThreshold;
   late bool _persistDefaultClusteringDistance;
+  String? _resetProgressLabel;
+  double? _resetProgress;
 
   @override
   void initState() {
@@ -125,6 +131,8 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
                       _buildMLActionsCard(context),
                       const SizedBox(height: 8),
                       _buildResetActionsCard(context),
+                      if (_resetProgressLabel != null)
+                        _buildResetProgressCard(context),
                       const SizedBox(height: 60),
                     ],
                   ),
@@ -599,6 +607,36 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
   Widget _buildResetActionsCard(BuildContext context) {
     return SettingsGroupedCard(
       children: [
+        if (!isLocalGalleryMode)
+          MenuItemWidgetNew(
+            title: "Reset body review and grouping",
+            subText:
+                "Clear body decisions, manual groups, and rejected matches across indexed photos.",
+            subTextMaxLines: 2,
+            leadingIconWidget: _buildIconWidget(
+              context,
+              HugeIcons.strokeRoundedUserRemove01,
+            ),
+            trailingIcon: Icons.chevron_right_outlined,
+            trailingIconIsMuted: true,
+            onTap: () async =>
+                _onResetBodyData(context, removeDetections: false),
+          ),
+        if (!isLocalGalleryMode)
+          MenuItemWidgetNew(
+            title: "Reset body indexes and re-run",
+            subText:
+                "Remove body detections and embeddings, then index them again. Face and CLIP data remain.",
+            subTextMaxLines: 2,
+            leadingIconWidget: _buildIconWidget(
+              context,
+              HugeIcons.strokeRoundedReload,
+            ),
+            trailingIcon: Icons.chevron_right_outlined,
+            trailingIconIsMuted: true,
+            onTap: () async =>
+                _onResetBodyData(context, removeDetections: true),
+          ),
         if (wrappedService.isEnabled)
           MenuItemWidgetNew(
             title: "Recompute Ente Rewind",
@@ -676,6 +714,184 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
         ),
       ],
     );
+  }
+
+  Widget _buildResetProgressCard(BuildContext context) {
+    return SettingsGroupedCard(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _resetProgressLabel!,
+                style: getEnteTextTheme(context).small,
+              ),
+              const SizedBox(height: 10),
+              LinearProgressIndicator(value: _resetProgress),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _onResetBodyData(
+    BuildContext context, {
+    required bool removeDetections,
+  }) async {
+    try {
+      final bodyIndexes = await mlDataDB.bodyIndexes();
+      final files = [
+        ...await SearchService.instance.getAllFilesForSearch(),
+        ...await SearchService.instance.getHiddenFiles(),
+      ];
+      final fileByID = <int, EnteFile>{};
+      for (final file in files) {
+        final fileID = file.uploadedFileID;
+        if (fileID != null && file.isOwner && bodyIndexes.containsKey(fileID)) {
+          fileByID[fileID] = file;
+        }
+      }
+      final targets = [
+        for (final entry in bodyIndexes.entries)
+          if (fileByID[entry.key] case final file?)
+            (file: file, localBodyJson: entry.value),
+      ];
+      if (!context.mounted) return;
+      if (targets.isEmpty) {
+        showShortToast(context, "No indexed body data in this library");
+        return;
+      }
+
+      final rerun = removeDetections;
+      await showChoiceDialog(
+        context,
+        title: "Are you sure?",
+        body: removeDetections
+            ? "This will clear body detections and embeddings from ${targets.length} indexed photos, then re-run body indexing. The original photos and face/CLIP data are unchanged."
+            : "This will clear body review decisions, manual group splits, and rejected matches from ${targets.length} indexed photos. Detection data and embeddings are preserved.",
+        firstButtonLabel: removeDetections
+            ? "Reset and re-run"
+            : "Reset body review",
+        firstButtonOnTap: () async {
+          if (_resetProgressLabel != null) return;
+          setState(() {
+            _resetProgressLabel = "Preparing ${targets.length} photos";
+            _resetProgress = 0;
+          });
+          try {
+            final operation = removeDetections
+                ? BodyRecognitionService.instance.clearBodyIndex
+                : BodyRecognitionService.instance.resetReviewData;
+            var completed = 0;
+            var changed = 0;
+            final failures = <int>[];
+            final lockAttempt = await MlProcessLock.instance.tryRunExclusive(
+              MlOperation.clearData,
+              () async {
+                const batchSize = 10;
+                for (
+                  var start = 0;
+                  start < targets.length;
+                  start += batchSize
+                ) {
+                  final end = start + batchSize < targets.length
+                      ? start + batchSize
+                      : targets.length;
+                  final batch = targets.sublist(start, end);
+                  final results = await Future.wait<bool?>(
+                    batch.map((item) async {
+                      try {
+                        return await operation(
+                          item.file,
+                          localBodyJson: item.localBodyJson,
+                        );
+                      } catch (e, s) {
+                        final fileID = item.file.uploadedFileID!;
+                        failures.add(fileID);
+                        logger.warning(
+                          "Failed to reset body data for file $fileID",
+                          e,
+                          s,
+                        );
+                        return null;
+                      }
+                    }),
+                  );
+                  completed += batch.length;
+                  changed += results.where((result) => result == true).length;
+                  if (mounted) {
+                    setState(() {
+                      _resetProgressLabel =
+                          "Reset $completed / ${targets.length}";
+                      _resetProgress = completed / targets.length;
+                    });
+                  }
+                }
+                await fileDataService.syncFDStatus();
+                BodyRecognitionService.instance.invalidateCaches();
+                await BodyRecognitionService.instance.indexes();
+                Bus.instance.fire(PeopleChangedEvent());
+              },
+              background: false,
+              waitForAvailability: true,
+              waitDeadline: const Duration(minutes: 3),
+            );
+            if (lockAttempt != MlLockAttempt.ran) {
+              throw StateError(
+                "Could not acquire the ML lock: ${lockAttempt.name}",
+              );
+            }
+            if (failures.isNotEmpty) {
+              throw StateError(
+                "Updated $completed / ${targets.length} photos; ${failures.length} failed (first file ID ${failures.first}). Run the reset again to retry.",
+              );
+            }
+            if (rerun) {
+              if (mounted) {
+                setState(() {
+                  _resetProgressLabel = "Re-indexing body data";
+                  _resetProgress = null;
+                });
+              }
+              final disposition = await MLService.instance.runAllML(
+                force: true,
+              );
+              if (disposition != MlRunDisposition.completed) {
+                throw StateError(
+                  "Body re-indexing ended with ${disposition.name}",
+                );
+              }
+            }
+            if (!context.mounted) return;
+            showShortToast(
+              context,
+              rerun
+                  ? "Reset body data for $changed photos and re-indexed"
+                  : "Reset body review data for $changed photos",
+            );
+          } catch (e, s) {
+            logger.warning("Body ML reset failed", e, s);
+            if (!context.mounted) return;
+            await showGenericErrorDialog(context: context, error: e);
+          } finally {
+            if (mounted) {
+              setState(() {
+                _resetProgressLabel = null;
+                _resetProgress = null;
+              });
+            }
+          }
+        },
+        isCritical: removeDetections,
+      );
+    } catch (e, s) {
+      logger.warning("Failed to prepare body ML reset", e, s);
+      if (!context.mounted) return;
+      await showGenericErrorDialog(context: context, error: e);
+    }
   }
 
   Widget _buildIconWidget(BuildContext context, List<List<dynamic>> icon) {

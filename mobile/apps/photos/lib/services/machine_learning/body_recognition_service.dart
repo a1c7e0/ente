@@ -82,6 +82,82 @@ class BodyRecognitionService {
   Future<void> store(IMLDataDB<int> db, int fileID, BodyIndex index) =>
       db.putBodyIndex(fileID, jsonEncode(index.toJson()), index.version);
 
+  void invalidateCaches() {
+    _rawIndexes = {};
+    _parsedIndexes = {};
+    _indexRevision++;
+    _matchKey = null;
+    _matches = const [];
+    _groupMatchKey = null;
+    _groups = const [];
+  }
+
+  Future<bool> resetReviewData(
+    EnteFile file, {
+    required String? localBodyJson,
+  }) async {
+    final fileID = file.uploadedFileID;
+    if (fileID == null) return false;
+
+    var remoteChanged = false;
+    final updated = await fileDataService.updateFileDataAllowingPartialMetadata(
+      file,
+      (latest) {
+        final raw = latest.remoteRawData["body"];
+        if (raw is! Map) return false;
+        final body = Map<String, dynamic>.from(raw);
+        final cleared = clearBodyReviewData(body);
+        if (jsonEncode(cleared) == jsonEncode(body)) return false;
+        latest.remoteRawData["body"] = cleared;
+        remoteChanged = true;
+        return true;
+      },
+    );
+
+    final remoteBody = updated.remoteRawData["body"];
+    Map<String, dynamic>? body;
+    if (remoteBody is Map) {
+      body = clearBodyReviewData(Map<String, dynamic>.from(remoteBody));
+    } else if (localBodyJson != null) {
+      final localBody = jsonDecode(localBodyJson);
+      if (localBody is Map<String, dynamic>) {
+        body = clearBodyReviewData(localBody);
+      }
+    }
+
+    var localChanged = false;
+    if (body != null && BodyIndex.tryParse(body) != null) {
+      final encoded = jsonEncode(body);
+      localChanged = encoded != localBodyJson;
+      if (localChanged) {
+        await MLDataDB.instance.putBodyIndex(
+          fileID,
+          encoded,
+          (body["version"] as num).toInt(),
+        );
+      }
+    }
+    invalidateCaches();
+    return remoteChanged || localChanged;
+  }
+
+  Future<bool> clearBodyIndex(
+    EnteFile file, {
+    required String? localBodyJson,
+  }) async {
+    final fileID = file.uploadedFileID;
+    if (fileID == null) return false;
+
+    var remoteChanged = false;
+    await fileDataService.updateFileDataAllowingPartialMetadata(file, (latest) {
+      remoteChanged = latest.remoteRawData.remove("body") != null;
+      return remoteChanged;
+    });
+    await MLDataDB.instance.deleteBodyIndexes([fileID]);
+    invalidateCaches();
+    return remoteChanged || localBodyJson != null;
+  }
+
   Future<void> publish(
     IMLDataDB<int> db,
     EnteFile file,

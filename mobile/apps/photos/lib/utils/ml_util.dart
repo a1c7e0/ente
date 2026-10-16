@@ -235,7 +235,10 @@ _getOnlineFilesForMlIndexingCandidates() async {
     final shouldRunBodies = !bodyIndexedFileIDs.containsKey(
       enteFile.uploadedFileID,
     );
-    if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
+    if (!shouldRunFaces &&
+        !shouldRunClip &&
+        !shouldRunPets &&
+        !shouldRunBodies) {
       continue;
     }
     final instruction = FileMLInstruction(
@@ -279,7 +282,10 @@ _getOnlineFilesForMlIndexingCandidates() async {
     final shouldRunBodies = !bodyIndexedFileIDs.containsKey(
       enteFile.uploadedFileID,
     );
-    if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
+    if (!shouldRunFaces &&
+        !shouldRunClip &&
+        !shouldRunPets &&
+        !shouldRunBodies) {
       continue;
     }
     hiddenFilesToIndex.add(
@@ -400,7 +406,10 @@ Future<List<FileMLInstruction>> getLocalGalleryFilesForMlIndexing() async {
           petMlVersion,
         );
     final shouldRunBodies = !bodyIndexedFileIDs.containsKey(localIntId);
-    if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
+    if (!shouldRunFaces &&
+        !shouldRunClip &&
+        !shouldRunPets &&
+        !shouldRunBodies) {
       continue;
     }
     instructions.add(
