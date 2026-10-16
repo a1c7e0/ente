@@ -650,15 +650,17 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
         : await PersonService.instance.getPersonsMap();
     _automaticBodies = {};
     _automaticClusterBodies = {};
-    for (final match in await BodyRecognitionService.instance.matches(
-      await SearchService.instance.getAllFilesForSearch(),
-    )) {
-      if (!match.automatic || match.fileID != fileKey) continue;
-      if (persons.containsKey(match.personID)) {
-        _automaticBodies[match.personID] = match;
-      } else if (match.personID.startsWith("cluster:")) {
-        _automaticClusterBodies[match.personID.substring("cluster:".length)] =
-            match;
+    if (!isLocalGallery) {
+      for (final match in await BodyRecognitionService.instance.matches(
+        await SearchService.instance.getAllFilesForSearch(),
+      )) {
+        if (!match.automatic || match.fileID != fileKey) continue;
+        if (persons.containsKey(match.personID)) {
+          _automaticBodies[match.personID] = match;
+        } else if (match.personID.startsWith("cluster:")) {
+          _automaticClusterBodies[match.personID.substring("cluster:".length)] =
+              match;
+        }
       }
     }
 

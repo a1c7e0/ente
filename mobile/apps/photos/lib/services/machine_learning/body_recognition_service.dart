@@ -5,7 +5,6 @@ import "package:logging/logging.dart";
 import "package:photos/db/files_db.dart";
 import "package:photos/db/ml/base.dart";
 import "package:photos/db/ml/db.dart";
-import "package:photos/db/offline_files_db.dart";
 import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
@@ -29,7 +28,6 @@ class BodyRecognitionService {
   int _indexRevision = 0;
   String? _matchKey;
   List<BodyMatch> _matches = const [];
-  IMLDataDB<int>? _cachedDatabase;
 
   Future<BodyIndex> analyze(int fileID, String path, List<Face> faces) async {
     final result = await rust.analyzeBodiesRust(
@@ -102,18 +100,8 @@ class BodyRecognitionService {
     );
   }
 
-  Future<Map<int, BodyIndex>> indexes({bool? localGallery}) async {
-    final db = (localGallery ?? isLocalGalleryMode)
-        ? MLDataDB.localGalleryInstance
-        : MLDataDB.instance;
-    final data = await db.bodyIndexes();
-    if (!identical(db, _cachedDatabase)) {
-      _cachedDatabase = db;
-      _rawIndexes = {};
-      _parsedIndexes = {};
-      _indexRevision++;
-      _matchKey = null;
-    }
+  Future<Map<int, BodyIndex>> indexes() async {
+    final data = await MLDataDB.instance.bodyIndexes();
     if (data.length == _rawIndexes.length &&
         data.entries.every((e) => _rawIndexes[e.key] == e.value)) {
       return _parsedIndexes;
@@ -133,42 +121,22 @@ class BodyRecognitionService {
     return result;
   }
 
-  /// Resolve the same keys used by the active ML database without creating IDs.
-  Future<Map<int, EnteFile>> filesByKey(
-    List<EnteFile> files, {
-    bool? localGallery,
-  }) async {
-    if (!(localGallery ?? isLocalGalleryMode)) {
-      return {
-        for (final file in files)
-          if (file.uploadedFileID != null) file.uploadedFileID!: file,
-      };
-    }
-    final byLocalID = {
-      for (final file in files)
-        if (file.localID != null && file.localID!.isNotEmpty)
-          file.localID!: file,
-    };
-    final keys = await OfflineFilesDB.instance.getLocalIntIdsForLocalIds(
-      byLocalID.keys,
-    );
-    return {
-      for (final entry in keys.entries) entry.value: byLocalID[entry.key]!,
-    };
-  }
+  Future<Map<int, EnteFile>> filesByKey(List<EnteFile> files) async => {
+    for (final file in files)
+      if (file.uploadedFileID != null) file.uploadedFileID!: file,
+  };
 
   Future<List<BodyMatch>> matches(List<EnteFile> files) async {
-    final localGallery = isLocalGalleryMode;
-    final db = localGallery ? MLDataDB.localGalleryInstance : MLDataDB.instance;
-    final indices = await indexes(localGallery: localGallery);
+    // Local-gallery mode keeps inference and storage, without body matching.
+    if (isLocalGalleryMode) return [];
+    final db = MLDataDB.instance;
+    final indices = await indexes();
     if (indices.isEmpty) return [];
     final facePersons = <String, String>{};
-    if (!localGallery) {
-      final persons = await PersonService.instance.getPersonsMap();
-      for (final person in persons.values) {
-        for (final faceID in await db.getFaceIDsForPerson(person.remoteID)) {
-          facePersons[faceID] = person.remoteID;
-        }
+    final persons = await PersonService.instance.getPersonsMap();
+    for (final person in persons.values) {
+      for (final faceID in await db.getFaceIDsForPerson(person.remoteID)) {
+        facePersons[faceID] = person.remoteID;
       }
     }
     final clusters = await db.getAllClusterIdToFaceIDs();
@@ -177,7 +145,7 @@ class BodyRecognitionService {
         facePersons.putIfAbsent(faceID, () => "cluster:${cluster.key}");
       }
     }
-    final keyedFiles = await filesByKey(files, localGallery: localGallery);
+    final keyedFiles = await filesByKey(files);
     final times = {
       for (final entry in keyedFiles.entries)
         if (entry.value.creationTime != null)
@@ -186,7 +154,6 @@ class BodyRecognitionService {
     final timeKeys = times.keys.toList()..sort();
     final faceKeys = facePersons.keys.toList()..sort();
     final key = jsonEncode([
-      localGallery,
       _indexRevision,
       [
         for (final id in timeKeys) [id, times[id]],
@@ -217,9 +184,7 @@ class BodyRecognitionService {
     String clusterID,
     List<EnteFile> files,
   ) async {
-    final db = isLocalGalleryMode
-        ? MLDataDB.localGalleryInstance
-        : MLDataDB.instance;
+    final db = MLDataDB.instance;
     final clusterFiles = await db.getFileIdToClusterIds();
     final keyedFiles = await filesByKey(files);
     final ids = {

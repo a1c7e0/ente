@@ -121,11 +121,11 @@ naming/ignore operations are unchanged; the body layer does not create person
 entities. Body-derived attachments do not seed face clustering or become new
 body anchors.
 
-Mobile local-gallery matching reads the local ML database and resolves device
-photo IDs through the existing offline integer-key map. Account matching uses
-uploaded file IDs and the account ML database. The derived cache distinguishes
-the two databases/modes. This does not add local-only person saving or review
-operations, and does not trigger image inference or a historical rescan.
+Mobile local-gallery mode retains body detection, embedding generation and local
+index storage. Body identity matching, body additions to unnamed galleries and
+body identity tags are limited to account mode, using uploaded file IDs and the
+account ML database. The upstream local face-gallery flow is unchanged. No
+historical body-only rescan is scheduled.
 
 The initial attachment gates are cosine similarity ≥0.74, best-minus-runner-up
 margin ≥0.05, capture-time difference ≤3 hours and one person per photo. Review

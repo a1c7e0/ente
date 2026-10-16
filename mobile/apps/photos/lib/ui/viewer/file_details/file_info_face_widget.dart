@@ -7,6 +7,7 @@ import "package:flutter/foundation.dart" show kDebugMode;
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 import "package:photos/db/ml/db.dart";
+import "package:photos/db/offline_files_db.dart";
 import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/face.dart";
@@ -222,8 +223,36 @@ class _FileInfoFaceWidgetState extends State<FileInfoFaceWidget> {
         await mlDataDB.getClusterIDForFaceID(widget.face.faceID);
     if (clusterID != null) {
       final files = await SearchService.instance.getAllFilesForSearch();
-      final clusterFiles = await BodyRecognitionService.instance
-          .filesForCluster(clusterID, files);
+      List<EnteFile> clusterFiles;
+      if (isLocalGalleryMode) {
+        final fileIdsToClusterIds = await mlDataDB.getFileIdToClusterIds();
+        final localIntIds = fileIdsToClusterIds.keys.toSet();
+        final localIdMap = await OfflineFilesDB.instance.getLocalIdsForIntIds(
+          localIntIds,
+        );
+        final localIdToFile = <String, EnteFile>{};
+        for (final file in files) {
+          final localId = file.localID;
+          if (localId != null && localId.isNotEmpty) {
+            localIdToFile[localId] = file;
+          }
+        }
+        clusterFiles = [];
+        for (final entry in fileIdsToClusterIds.entries) {
+          if (!entry.value.contains(clusterID)) continue;
+          final localId = localIdMap[entry.key];
+          if (localId == null) continue;
+          final file = localIdToFile[localId];
+          if (file != null) {
+            clusterFiles.add(file);
+          }
+        }
+      } else {
+        clusterFiles = await BodyRecognitionService.instance.filesForCluster(
+          clusterID,
+          files,
+        );
+      }
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(

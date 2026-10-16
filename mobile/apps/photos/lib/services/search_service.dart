@@ -1361,21 +1361,6 @@ class SearchService {
             clusterIdToFiles.putIfAbsent(cluster, () => []).add(file);
           }
         }
-        final bodyService = BodyRecognitionService.instance;
-        final keyedFiles = await bodyService.filesByKey(allFiles);
-        for (final match in await bodyService.matches(allFiles)) {
-          if (!match.automatic || !match.personID.startsWith("cluster:")) {
-            continue;
-          }
-          final clusterID = match.personID.substring("cluster:".length);
-          final members = clusterIdToFiles[clusterID];
-          final file = keyedFiles[match.fileID];
-          if (members != null &&
-              file != null &&
-              !members.any((member) => member.localID == file.localID)) {
-            members.add(file);
-          }
-        }
         final List<GenericSearchResult> facesResult = [];
         final sortedClusterIds = clusterIdToFiles.keys.toList()
           ..sort(

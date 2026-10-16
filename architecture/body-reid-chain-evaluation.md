@@ -124,9 +124,10 @@ boundaries remain unchanged. The current shipping defaults remain unchanged;
 0.84/0.16 is an offline high-precision candidate, not a production guarantee.
 
 Separate fixes on this branch let existing high-confidence body matches appear
-in unnamed face-cluster galleries and details, select the correct local-mode ML
-database/integer keys, and preserve unnamed-cluster removals with stable anchor
-face references. They add no local-only naming/review controls, model changes,
+in account-mode unnamed face-cluster galleries and details, and preserve
+unnamed-cluster removals with stable anchor face references. The later local-mode
+matching extension has been reverted; local mode retains basic body inference
+and storage only. These changes add no local-only naming/review controls, model changes,
 historical rescan, or new count UI.
 
 Validation: Photos analyze passed; 13 relevant Flutter regressions passed;
@@ -139,4 +140,4 @@ validation has been performed for this branch.
 The corrected scripts, frozen configurations and raw statistics are available
 in the [reproduction archive](https://github.com/a1c7e0/ente/releases/download/photos-ml-diagnostics-2026-10-16/body-chain-evaluation-2026-10-16.zip).
 It contains no dataset images or weights. The existing release APK predates
-these unnamed/local-routing fixes.
+these account-mode unnamed-cluster fixes.
