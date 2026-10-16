@@ -39,6 +39,7 @@ class RustMLDataDB implements IMLDataDB<int> {
       RustMLDataDB._privateConstructor(databaseName: "ente.ml.offline.db");
 
   Future<rust.MlStore>? _dbFuture;
+  final Map<int, Map<int, String>> _bodyIndexesCache = {};
 
   Future<rust.MlStore> get store async {
     final future = _dbFuture ??= _openDatabase();
@@ -67,16 +68,46 @@ class RustMLDataDB implements IMLDataDB<int> {
       (await store).fillState(index: index);
 
   @override
-  Future<Map<int, String>> bodyIndexes({int minimumVersion = 1}) async =>
-      (await store).bodyIndexes(minimumVersion: minimumVersion);
+  Future<Map<int, String>> bodyIndexes({int minimumVersion = 1}) async {
+    final cached = _bodyIndexesCache[minimumVersion];
+    if (cached != null) return cached;
+    final indexes = await (await store).bodyIndexes(
+      minimumVersion: minimumVersion,
+    );
+    final result = Map<int, String>.unmodifiable(indexes);
+    _bodyIndexesCache[minimumVersion] = result;
+    return result;
+  }
 
   @override
-  Future<void> putBodyIndex(int fileID, String data, int version) async =>
-      (await store).putBodyIndex(fileId: fileID, data: data, version: version);
+  Future<void> putBodyIndex(int fileID, String data, int version) async {
+    await (await store).putBodyIndex(
+      fileId: fileID,
+      data: data,
+      version: version,
+    );
+    for (final entry in _bodyIndexesCache.entries.toList()) {
+      final next = Map<int, String>.from(entry.value);
+      if (version >= entry.key) {
+        next[fileID] = data;
+      } else {
+        next.remove(fileID);
+      }
+      _bodyIndexesCache[entry.key] = Map.unmodifiable(next);
+    }
+  }
 
   @override
-  Future<void> deleteBodyIndexes(List<int> fileIDs) async =>
-      (await store).deleteBodyIndexes(fileIds: Int64List.fromList(fileIDs));
+  Future<void> deleteBodyIndexes(List<int> fileIDs) async {
+    await (await store).deleteBodyIndexes(fileIds: Int64List.fromList(fileIDs));
+    for (final entry in _bodyIndexesCache.entries.toList()) {
+      final next = Map<int, String>.from(entry.value);
+      for (final fileID in fileIDs) {
+        next.remove(fileID);
+      }
+      _bodyIndexesCache[entry.key] = Map.unmodifiable(next);
+    }
+  }
 
   Future<void> releaseVectorIndexes() async {
     if (_dbFuture == null) return;
@@ -88,10 +119,13 @@ class RustMLDataDB implements IMLDataDB<int> {
   }
 
   @override
-  Future<void> clearTable() => runMlOperationExclusive(
-    MlOperation.clearData,
-    () async => (await store).clearAll(),
-  );
+  Future<void> clearTable() async {
+    await runMlOperationExclusive(
+      MlOperation.clearData,
+      () async => (await store).clearAll(),
+    );
+    _bodyIndexesCache.clear();
+  }
 
   @override
   Future<void> checkMigrateFillClipVectorDB({bool force = false}) =>

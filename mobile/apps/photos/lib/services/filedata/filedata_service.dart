@@ -293,7 +293,7 @@ class FileDataService {
           final raw = entity.remoteRawData["body"];
           if (raw is Map<String, dynamic> &&
               (entity.bodyIndex != null || entity.hasUnsupportedBody)) {
-            final encoded = jsonEncode(raw);
+            final encoded = jsonEncode(entity.bodyIndex?.toJson() ?? raw);
             if (existing[entity.fileID] != encoded) {
               await MLDataDB.instance.putBodyIndex(
                 entity.fileID,

@@ -178,15 +178,26 @@ structured indexes in IndexedDB. Rendered body crops are local cache files, not
 new fields or image bytes in mldata. Remote mldata already goes through gzip
 before encryption on both clients.
 
-As a size illustration, the first 100 vectors in the production-model Market-1501
-evaluation output (`float32`, 512 dimensions) occupy 7,291–8,120 bytes as compact
-Python JSON (median 7,647.5), compared with 2,048 bytes as raw float32. Gzipping
-those individual JSON arrays gives a median 3,483.5 bytes. Actual Dart/JavaScript
-serialization, vector values, multiple detections per photo, metadata, SQLite
-pages and whole-mldata compression change these sizes. The sample is not a
-measurement of a user's database or an exact remote-storage estimate. Mobile
-also retains raw JSON and parsed objects for matching; large libraries therefore
-have additional memory and full-index-read costs beyond the on-disk text.
+Newly written vectors are rounded to four significant decimal digits and retain
+the existing numeric-array shape. A precision marker is informational; older
+body clients still read the vectors as ordinary numbers. On 7,877 production
+OSNet vectors from Market-1501, the mean absolute pairwise cosine change was
+`9.4e-6` (maximum `6.7e-5`). Across 62,047,129 pairs, 62 crossed the 0.74 match
+cutoff and 20 crossed the 0.8 review-group cutoff. In a 500-vector, one-body
+per-photo serialization sample, median gzipped body metadata fell from 3,728 to
+1,390 bytes (63%). These measurements estimate vector-heavy metadata; real
+albums vary with detections per photo, feedback and the rest of mldata.
+The Penn-Fudan gate sweep found that stricter size/confidence filters save only
+about 6–9% of detections while losing some annotated people. The current
+thresholds remain unchanged: precision rounding cuts the estimated vector
+payload substantially without suppressing small detections.
+
+Mobile reuses its parsed body indexes until a body-index write or delete changes
+the in-memory DB snapshot. Desktop tracks a lightweight body-index revision in
+IndexedDB and only reloads the full set when that revision changes. This avoids
+re-reading and stringifying every embedding whenever body review suggestions are
+requested. The app still computes matches after relevant ML or feedback changes;
+no real-phone before/after timing is claimed.
 
 Body review previously regenerated crops outside the face crop cache, including
 when suggestions were prefetched. It also resolved derived group membership
@@ -203,14 +214,10 @@ Cached crops consume additional local cache space, using the existing cache
 locations and cleanup lifecycle; this is not a zero-storage-cost optimization.
 
 The first uncached remote preview may still need source download and image
-decoding. Matching still reads whole body indexes, and Mobile matching runs in
-the Dart isolate. These changes remove redundant crop/group work, not every
-large-library bottleneck; no real-phone before/after latency is claimed.
-A follow-up can add per-file/incremental reads and time-indexed candidate lookup.
-Local-only float32 BLOB/typed-array storage merits a measured migration proposal;
-changing canonical cloud vector encoding or adding FP16/int8 quantization requires
-separate compatibility and accuracy review. No format or precision change is
-included here.
+decoding. Matching still reads body indexes after relevant changes, and Mobile
+matching runs in the Dart isolate. A follow-up can add per-file/incremental reads
+and time-indexed candidate lookup. Local-only float32 BLOB/typed-array storage
+can be evaluated if measured libraries still show costly local DB reads.
 
 Review retains the existing layout, controls and full-body `contain` fit. A
 body-only reduction of the face crop's generous padding could improve subject

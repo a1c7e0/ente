@@ -22,6 +22,28 @@ BodyDetection body(String id, {String? face, double cosine = 1}) =>
 void main() {
   const time = 1700000000000000;
   test(
+    "body embedding persistence keeps a compact compatible number array",
+    () {
+      final index = BodyIndex(1000, 1000, [
+        BodyDetection(
+          bodyID: "body:1_1",
+          box: const FaceBox(x: 0.1, y: 0.1, width: 0.3, height: 0.7),
+          score: 0.9,
+          embedding: [0.12345678, -0.00789123, ...List<double>.filled(510, 0)],
+        ),
+      ]);
+      final raw = index.toJson();
+      final detection = (raw["detections"] as List).single as Map;
+
+      expect(raw["embeddingPrecision"], bodyEmbeddingPrecision);
+      expect(detection["embedding"], isA<List<num>>());
+      expect((detection["embedding"] as List).first, 0.1235);
+      expect((detection["embedding"] as List)[1], -0.007891);
+      expect(BodyIndex.tryParse(raw), isNotNull);
+    },
+  );
+
+  test(
     "unnamed-cluster body rejections survive naming without claiming a stranger",
     () {
       final rejected = BodyDetection.fromJson({

@@ -1,12 +1,16 @@
 import log from "ente-base/log";
 import { deleteDB, openDB, type DBSchema } from "idb";
-import type { LocalBodyIndex } from "./body";
+import { compactBodyIndex, type LocalBodyIndex } from "./body";
 import type { LocalCLIPIndex } from "./clip";
 import type { FaceCluster } from "./cluster";
 import type { LocalFaceIndex } from "./face";
 
 interface MLDBSchema extends DBSchema {
     "body-index": { key: number; value: LocalBodyIndex };
+    "body-index-meta": {
+        key: string;
+        value: { key: string; revision: number };
+    };
     "file-status": {
         key: number;
         value: FileStatus;
@@ -28,9 +32,11 @@ interface FileStatus {
 
 // Workers cache separate connections; terminate them before deleting this DB.
 let _mlDB: ReturnType<typeof openMLDB> | undefined;
+let _bodyIndexesCache:
+    { revision: number; indexes: LocalBodyIndex[] } | undefined;
 
 const openMLDB = async () => {
-    const db = await openDB<MLDBSchema>("ml", 2, {
+    const db = await openDB<MLDBSchema>("ml", 3, {
         upgrade(db, oldVersion, newVersion) {
             log.info(`Upgrading ML DB ${oldVersion} => ${newVersion}`);
             if (oldVersion < 1) {
@@ -44,6 +50,8 @@ const openMLDB = async () => {
             }
             if (oldVersion < 2)
                 db.createObjectStore("body-index", { keyPath: "fileID" });
+            if (oldVersion < 3)
+                db.createObjectStore("body-index-meta", { keyPath: "key" });
         },
         blocking() {
             log.info(
@@ -74,6 +82,7 @@ export const clearMLDB = async () => {
         log.warn("Ignoring error when trying to close ML DB", e);
     }
     _mlDB = undefined;
+    _bodyIndexesCache = undefined;
 
     return deleteDB("ml", {
         blocked() {
@@ -134,11 +143,54 @@ export const savedCLIPIndexes = async () => {
     return await db.getAll("clip-index");
 };
 
-export const savedBodyIndexes = async () => (await mlDB()).getAll("body-index");
-export const deleteBodyIndex = async (fileID: number) =>
-    (await mlDB()).delete("body-index", fileID);
-export const saveBodyIndex = async (index: LocalBodyIndex) =>
-    (await mlDB()).put("body-index", index);
+export const savedBodyIndexRevision = async () =>
+    (await (await mlDB()).get("body-index-meta", "revision"))?.revision ?? 0;
+
+export const savedBodyIndexes = async (): Promise<LocalBodyIndex[]> => {
+    const db = await mlDB();
+    while (true) {
+        const revision = await savedBodyIndexRevision();
+        if (_bodyIndexesCache?.revision === revision)
+            return _bodyIndexesCache.indexes;
+        const indexes = await db.getAll("body-index");
+        if ((await savedBodyIndexRevision()) == revision) {
+            _bodyIndexesCache = { revision, indexes };
+            return indexes;
+        }
+    }
+};
+
+const updateBodyIndexRevision = async (store: {
+    get: (
+        key: string,
+    ) => Promise<{ key: string; revision: number } | undefined>;
+    put: (value: { key: string; revision: number }) => Promise<unknown>;
+}) => {
+    const meta = await store.get("revision");
+    await store.put({ key: "revision", revision: (meta?.revision ?? 0) + 1 });
+};
+
+export const deleteBodyIndex = async (fileID: number) => {
+    const db = await mlDB();
+    const tx = db.transaction(["body-index", "body-index-meta"], "readwrite");
+    await Promise.all([
+        tx.objectStore("body-index").delete(fileID),
+        updateBodyIndexRevision(tx.objectStore("body-index-meta")),
+        tx.done,
+    ]);
+};
+
+export const saveBodyIndex = async (index: LocalBodyIndex) => {
+    const db = await mlDB();
+    const tx = db.transaction(["body-index", "body-index-meta"], "readwrite");
+    await Promise.all([
+        tx
+            .objectStore("body-index")
+            .put({ ...compactBodyIndex(index), fileID: index.fileID }),
+        updateBodyIndexRevision(tx.objectStore("body-index-meta")),
+        tx.done,
+    ]);
+};
 
 export const recordBodyVersion = async (
     fileID: number,
@@ -169,7 +221,13 @@ export const updateAssumingLocalFiles = async (
 ) => {
     const db = await mlDB();
     const tx = db.transaction(
-        ["file-status", "face-index", "clip-index", "body-index"],
+        [
+            "file-status",
+            "face-index",
+            "clip-index",
+            "body-index",
+            "body-index-meta",
+        ],
         "readwrite",
     );
     const fdbFileIDs = await tx.objectStore("file-status").getAllKeys();
@@ -207,6 +265,13 @@ export const updateAssumingLocalFiles = async (
             tx.done,
         ].flat(),
     );
+    if (removedFileIDs.length) {
+        const revisionTx = db.transaction("body-index-meta", "readwrite");
+        await Promise.all([
+            updateBodyIndexRevision(revisionTx.store),
+            revisionTx.done,
+        ]);
+    }
 };
 
 export const savedIndexCounts = async () => {

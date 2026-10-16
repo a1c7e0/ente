@@ -4,6 +4,14 @@ import "package:photos/models/ml/face/box.dart";
 
 const bodyMlVersion = 1;
 const bodyModel = "osnet-ain-x1.0-msmt17-v1";
+const bodyEmbeddingPrecision = "decimal4-v1";
+
+double _compactEmbeddingValue(double value) => value.isFinite && value != 0
+    ? double.parse(value.toStringAsPrecision(4))
+    : value;
+
+List<double> compactBodyEmbedding(Iterable<double> values) =>
+    values.map(_compactEmbeddingValue).toList(growable: false);
 
 class BodyDetection {
   final String bodyID;
@@ -31,11 +39,11 @@ class BodyDetection {
     required this.bodyID,
     required this.box,
     required this.score,
-    required this.embedding,
+    required List<double> embedding,
     this.linkedFaceID,
     this.decisions = const {},
     this.raw = const {},
-  });
+  }) : embedding = compactBodyEmbedding(embedding);
 
   factory BodyDetection.fromJson(Map<String, dynamic> json) {
     final embedding = (json["embedding"] as List)
@@ -143,6 +151,7 @@ class BodyIndex {
     "width": width,
     "height": height,
     "detections": detections.map((d) => d.toJson()).toList(),
+    "embeddingPrecision": bodyEmbeddingPrecision,
   };
 }
 
@@ -159,7 +168,7 @@ Map<String, dynamic> clearBodyReviewData(Map<String, dynamic> body) {
     cleanedDetection["decisions"] = <String, dynamic>{};
     return cleanedDetection;
   }).toList();
-  return cleaned;
+  return BodyIndex.tryParse(cleaned)?.toJson() ?? cleaned;
 }
 
 double bodyCosine(List<double> a, List<double> b) {

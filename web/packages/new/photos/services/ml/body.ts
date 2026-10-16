@@ -5,6 +5,14 @@ import type { Face } from "./face";
 
 export const bodyIndexingVersion = 1;
 export const bodyModel = "osnet-ain-x1.0-msmt17-v1";
+export const bodyEmbeddingPrecision = "decimal4-v1";
+
+const compactEmbedding = (embedding: number[]) =>
+    embedding.map((value) =>
+        value === 0 || !Number.isFinite(value)
+            ? value
+            : Number(value.toPrecision(4)),
+    );
 
 export const isUnsupportedBodyIndex = (value: unknown) => {
     if (!value || typeof value != "object") return false;
@@ -30,7 +38,8 @@ export const BodyDetection = z.looseObject({
     embedding: z
         .array(z.number())
         .length(512)
-        .refine((v) => v.some((x) => x != 0)),
+        .refine((v) => v.some((x) => x != 0))
+        .transform(compactEmbedding),
     linkedFaceID: z.string().nullish(),
     groupID: z.string().startsWith("body-group:").optional(),
     rejectedAnchorFaceIDs: z.array(z.string()).optional(),
@@ -50,12 +59,22 @@ export const BodyIndex = z.looseObject({
     version: z.literal(bodyIndexingVersion),
     model: z.literal(bodyModel),
     client: z.string(),
+    embeddingPrecision: z.string().optional(),
     width: z.number().int().positive(),
     height: z.number().int().positive(),
     detections: z.array(BodyDetection),
 });
 export type BodyIndex = z.infer<typeof BodyIndex>;
 export type LocalBodyIndex = BodyIndex & { fileID: number };
+
+export const compactBodyIndex = (index: BodyIndex): BodyIndex => ({
+    ...index,
+    embeddingPrecision: bodyEmbeddingPrecision,
+    detections: index.detections.map((detection) => ({
+        ...detection,
+        embedding: compactEmbedding(detection.embedding),
+    })),
+});
 
 export interface BodyMatch {
     fileID: number;
@@ -165,7 +184,7 @@ export const linkBodyFaces = (
                 bodyID: d.bodyId,
                 box: { x, y, width: x2 - x, height: y2 - y },
                 score: d.score,
-                embedding: d.embedding,
+                embedding: compactEmbedding(d.embedding),
                 linkedFaceID,
                 decisions: {},
             },

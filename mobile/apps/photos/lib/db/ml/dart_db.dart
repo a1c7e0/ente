@@ -36,6 +36,7 @@ class DartMLDataDB
   final UsearchClipVectorDB _clipVectorDB;
   final UsearchClusterCentroidVectorDB _clusterCentroidVectorDB;
   final List<String> _migrationScripts;
+  Map<int, String>? _bodyIndexesCache;
 
   DartMLDataDB._privateConstructor({
     String databaseName = "ente.ml.db",
@@ -93,14 +94,39 @@ class DartMLDataDB
 
   @override
   Future<Map<int, String>> bodyIndexes({int minimumVersion = 1}) async {
+    final cached = _bodyIndexesCache;
+    if (cached != null) {
+      final versions = _bodyIndexVersionCache!;
+      if (cached.keys.every(
+        (fileID) => versions[fileID]! >= minimumVersion,
+      )) {
+        return cached;
+      }
+      return {
+        for (final entry in cached.entries)
+          if (versions[entry.key]! >= minimumVersion)
+            entry.key: entry.value,
+      };
+    }
     final rows = await (await asyncDB).getAll(
-      "SELECT file_id, data FROM body_index WHERE ml_version >= ?",
-      [minimumVersion],
+      "SELECT file_id, data, ml_version FROM body_index",
     );
+    final versions = <int, int>{};
+    final data = <int, String>{};
+    for (final row in rows) {
+      final fileID = row["file_id"] as int;
+      versions[fileID] = row["ml_version"] as int;
+      data[fileID] = row["data"] as String;
+    }
+    _bodyIndexVersionCache = versions;
+    _bodyIndexesCache = Map.unmodifiable(data);
     return {
-      for (final row in rows) row["file_id"] as int: row["data"] as String,
+      for (final entry in data.entries)
+        if (versions[entry.key]! >= minimumVersion) entry.key: entry.value,
     };
   }
+
+  Map<int, int>? _bodyIndexVersionCache;
 
   @override
   Future<void> putBodyIndex(int fileID, String data, int version) async {
@@ -108,6 +134,12 @@ class DartMLDataDB
       "INSERT INTO body_index(file_id, data, ml_version) VALUES (?, ?, ?) ON CONFLICT(file_id) DO UPDATE SET data=excluded.data, ml_version=excluded.ml_version",
       [fileID, data, version],
     );
+    final cached = _bodyIndexesCache;
+    final versions = _bodyIndexVersionCache;
+    if (cached != null && versions != null) {
+      _bodyIndexesCache = Map.unmodifiable({...cached, fileID: data});
+      _bodyIndexVersionCache = {...versions, fileID: version};
+    }
   }
 
   @override
@@ -118,6 +150,25 @@ class DartMLDataDB
         chunk,
       );
     }
+    final cached = _bodyIndexesCache;
+    final versions = _bodyIndexVersionCache;
+    if (cached != null && versions != null) {
+      final next = Map<int, String>.from(cached);
+      final nextVersions = Map<int, int>.from(versions);
+      for (final fileID in fileIDs) {
+        next.remove(fileID);
+        nextVersions.remove(fileID);
+      }
+      _bodyIndexesCache = Map.unmodifiable(next);
+      _bodyIndexVersionCache = nextVersions;
+    }
+  }
+
+  @override
+  Future<void> clearTable() async {
+    await super.clearTable();
+    _bodyIndexesCache = null;
+    _bodyIndexVersionCache = null;
   }
 
   Future<SqliteDatabase> get asyncDB =>

@@ -22,9 +22,10 @@ jobs:
             CARGO_INCREMENTAL: 0
             CARGO_PROFILE_DEV_DEBUG: 0
             CARGO_PROFILE_TEST_DEBUG: 0
-            SIGNING_KEY_ALIAS: photos-test
-            SIGNING_KEY_PASSWORD: android
-            SIGNING_STORE_PASSWORD: android
+            SIGNING_KEY_ALIAS: ${{ secrets.PHOTOS_TEST_KEY_ALIAS || 'photos-test' }}
+            SIGNING_KEY_PASSWORD: ${{ secrets.PHOTOS_TEST_KEY_PASSWORD || 'android' }}
+            SIGNING_STORE_PASSWORD: ${{ secrets.PHOTOS_TEST_KEYSTORE_PASSWORD || 'android' }}
+            SIGNING_KEYSTORE_BASE64: ${{ secrets.PHOTOS_TEST_KEYSTORE_BASE64 }}
         steps:
             - name: Checkout
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -122,11 +123,21 @@ jobs:
               working-directory: rust
               run: cargo test --locked -p ente-photos-frb --lib mobile_downloads_include_bodies_and_deduplicate_the_pet_detector
 
-            - name: Prepare development signature and arm64 packaging
+            - name: Prepare persistent test signature and arm64 packaging
               run: |
                   export SIGNING_KEY_PATH="$RUNNER_TEMP/photos-test.jks"
                   printf 'SIGNING_KEY_PATH=%s\n' "$SIGNING_KEY_PATH" >> "$GITHUB_ENV"
-                  keytool -genkeypair -keystore "$SIGNING_KEY_PATH" -storepass android -keypass android -alias "$SIGNING_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Ente Photos Test APK"
+                  if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
+                      test -n "$SIGNING_KEY_ALIAS" || { echo 'Missing PHOTOS_TEST_KEY_ALIAS repository secret' >&2; exit 1; }
+                      test -n "$SIGNING_KEY_PASSWORD" || { echo 'Missing PHOTOS_TEST_KEY_PASSWORD repository secret' >&2; exit 1; }
+                      test -n "$SIGNING_STORE_PASSWORD" || { echo 'Missing PHOTOS_TEST_KEYSTORE_PASSWORD repository secret' >&2; exit 1; }
+                      printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$SIGNING_KEY_PATH"
+                      echo "Using the persistent Photos test signing key."
+                  else
+                      keytool -genkeypair -keystore "$SIGNING_KEY_PATH" -storepass "$SIGNING_STORE_PASSWORD" -keypass "$SIGNING_KEY_PASSWORD" -alias "$SIGNING_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Ente Photos Test APK"
+                      echo "::warning::Persistent APK updates are disabled until PHOTOS_TEST_KEYSTORE_BASE64 and its related repository secrets are configured."
+                  fi
+                  chmod 600 "$SIGNING_KEY_PATH"
                   mkdir -p "$HOME/.gradle/init.d"
                   echo 'org.gradle.workers.max=2' >> "$HOME/.gradle/gradle.properties"
                   cat > "$HOME/.gradle/init.d/photos-arm64.gradle" <<'EOF'
@@ -212,7 +223,12 @@ jobs:
                   GH_REPO: ${{ github.repository }}
               run: |
                   tag="photos-${APK_CHANNEL}-test"
-                  notes="Photos ${APK_CHANNEL} arm64 test candidate built from ${GITHUB_SHA}. CI uses a temporary test signature; updating a locally re-signed installation requires re-signing this APK with the same local key. See architecture/fork-testing.md."
+                  if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
+                      signature_note="Consecutive builds on the same channel use the same test signing key, so they can update an existing installation."
+                  else
+                      signature_note="This build used an ephemeral signature; configure the fork test-signing secrets to update an existing installation."
+                  fi
+                  notes="Photos ${APK_CHANNEL} arm64 test candidate built from ${GITHUB_SHA}. ${signature_note} Main and ML Lab use different application IDs. See architecture/fork-testing.md."
                   if gh release view "$tag" >/dev/null 2>&1; then
                       gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/${tag}" -f sha="$GITHUB_SHA" -F force=true
                       gh release upload "$tag" artifacts/* --clobber
