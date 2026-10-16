@@ -114,10 +114,18 @@ pruned through file-data deletion and existing cleanup paths.
 ## Matching
 
 Body samples are anchored to face identities through geometric face containment.
-Only face-backed samples supply identity evidence. Unknown face clusters still
-compete in the ambiguity calculation, but are not promoted into named people by
-the body layer. Body-derived attachments do not seed face clustering or become
-new body anchors.
+Only face-backed samples supply identity evidence. Unknown face clusters compete
+in the ambiguity calculation and receive high-confidence body photos in their
+existing galleries and photo counts. Their face-based visibility thresholds and
+naming/ignore operations are unchanged; the body layer does not create person
+entities. Body-derived attachments do not seed face clustering or become new
+body anchors.
+
+Mobile local-gallery matching reads the local ML database and resolves device
+photo IDs through the existing offline integer-key map. Account matching uses
+uploaded file IDs and the account ML database. The derived cache distinguishes
+the two databases/modes. This does not add local-only person saving or review
+operations, and does not trigger image inference or a historical rescan.
 
 The initial attachment gates are cosine similarity ≥0.74, best-minus-runner-up
 margin ≥0.05, capture-time difference ≤3 hours and one person per photo. Review
@@ -131,6 +139,15 @@ Automatic memberships are derived locally and merged into person photo queries,
 counts and the photo information panel. They are not written into
 `manuallyAssigned`. A previous positive human decision suppresses automatic
 reassignment, including after the old photo tag or person is removed.
+
+Removing an automatic body photo from an unnamed face cluster records the
+optional `rejectedAnchorFaceIDs` field on the body detection. It refers to stable
+face IDs rather than a device-local cluster ID, so naming or re-clustering does
+not silently discard the rejection. Rejected identities remain competitors when
+computing the margin; a rejection must not turn a runner-up into an automatic
+claim. Clients that do not understand this optional field preserve it with the
+rest of the body metadata. Existing account/local-mode edit restrictions remain
+in force.
 
 ## Review
 

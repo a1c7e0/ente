@@ -47,6 +47,36 @@ const file = (id: number, seconds = 0) =>
     }) as EnteFile;
 
 describe("body evidence", () => {
+    test("stable unnamed-cluster rejections survive naming and retain rival scores", () => {
+        const rejected = {
+            ...detection("body:3_1"),
+            rejectedAnchorFaceIDs: ["1_face"],
+        };
+        const indexes = [
+            index(1, [detection("body:1_1", "1_face")]),
+            index(2, [detection("body:2_1", "2_face", vector(0.9))]),
+            index(3, [rejected]),
+        ];
+        for (const identity of ["cluster:unnamed", "named-person"]) {
+            expect(
+                matchBodies(
+                    indexes,
+                    [file(1), file(2), file(3)],
+                    new Map([
+                        ["1_face", identity],
+                        ["2_face", "another-person"],
+                    ]),
+                ),
+            ).toEqual([]);
+        }
+        expect(
+            BodyIndex.safeParse({
+                ...index(3, [rejected]),
+                detections: [{ ...rejected, rejectedAnchorFaceIDs: [42] }],
+            }).success,
+        ).toBe(false);
+    });
+
     test("attaches a back view to a face-anchored person inside three hours", () => {
         const matches = matchBodies(
             [

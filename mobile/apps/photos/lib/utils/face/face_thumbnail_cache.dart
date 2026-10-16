@@ -286,7 +286,7 @@ Future<Uint8List?> precomputeClusterFaceCrop(
   try {
     if (isBodyReference(clusterID)) {
       final crops = await BodyRecognitionService.instance.crop(file, clusterID);
-      return crops[file.uploadedFileID];
+      return crops.values.firstOrNull;
     }
     final w = (kDebugMode ? EnteWatch('precomputeClusterFaceCrop') : null)
       ?..start();

@@ -1361,6 +1361,21 @@ class SearchService {
             clusterIdToFiles.putIfAbsent(cluster, () => []).add(file);
           }
         }
+        final bodyService = BodyRecognitionService.instance;
+        final keyedFiles = await bodyService.filesByKey(allFiles);
+        for (final match in await bodyService.matches(allFiles)) {
+          if (!match.automatic || !match.personID.startsWith("cluster:")) {
+            continue;
+          }
+          final clusterID = match.personID.substring("cluster:".length);
+          final members = clusterIdToFiles[clusterID];
+          final file = keyedFiles[match.fileID];
+          if (members != null &&
+              file != null &&
+              !members.any((member) => member.localID == file.localID)) {
+            members.add(file);
+          }
+        }
         final List<GenericSearchResult> facesResult = [];
         final sortedClusterIds = clusterIdToFiles.keys.toList()
           ..sort(
@@ -1481,14 +1496,26 @@ class SearchService {
         }
       }
 
+      final faceClusterSizes = {
+        for (final entry in clusterIdToFiles.entries)
+          entry.key: entry.value.length,
+      };
       for (final match in await BodyRecognitionService.instance.matches(
         uploadedIdToFile.values.toList(),
       )) {
-        if (!match.automatic || !personIdToPerson.containsKey(match.personID)) {
-          continue;
-        }
+        if (!match.automatic) continue;
         final file = uploadedIdToFile[match.fileID];
         if (file == null) continue;
+        if (match.personID.startsWith("cluster:")) {
+          final clusterID = match.personID.substring("cluster:".length);
+          final members = clusterIdToFiles[clusterID];
+          if (members != null &&
+              !members.any((member) => member.uploadedFileID == match.fileID)) {
+            members.add(file);
+          }
+          continue;
+        }
+        if (!personIdToPerson.containsKey(match.personID)) continue;
         final ids = personIdToFileIds.putIfAbsent(
           match.personID,
           () => <int>{},
@@ -1612,7 +1639,7 @@ class SearchService {
               );
             }
           }
-          if (files.length < minClusterSize) continue;
+          if ((faceClusterSizes[clusterId] ?? 0) < minClusterSize) continue;
           facesResult.add(
             GenericSearchResult(
               ResultType.faces,

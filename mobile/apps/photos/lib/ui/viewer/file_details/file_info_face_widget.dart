@@ -7,12 +7,12 @@ import "package:flutter/foundation.dart" show kDebugMode;
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 import "package:photos/db/ml/db.dart";
-import "package:photos/db/offline_files_db.dart";
 import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_detection/detection.dart";
 import "package:photos/services/machine_learning/face_ml/face_filtering/face_filtering_constants.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
@@ -221,42 +221,9 @@ class _FileInfoFaceWidgetState extends State<FileInfoFaceWidget> {
         widget.clusterID ??
         await mlDataDB.getClusterIDForFaceID(widget.face.faceID);
     if (clusterID != null) {
-      final fileIdsToClusterIds = await mlDataDB.getFileIdToClusterIds();
       final files = await SearchService.instance.getAllFilesForSearch();
-      List<EnteFile> clusterFiles;
-      if (isLocalGalleryMode) {
-        final localIntIds = fileIdsToClusterIds.keys.toSet();
-        final localIdMap = await OfflineFilesDB.instance.getLocalIdsForIntIds(
-          localIntIds,
-        );
-        final localIdToFile = <String, EnteFile>{};
-        for (final file in files) {
-          final localId = file.localID;
-          if (localId != null && localId.isNotEmpty) {
-            localIdToFile[localId] = file;
-          }
-        }
-        clusterFiles = [];
-        for (final entry in fileIdsToClusterIds.entries) {
-          if (!entry.value.contains(clusterID)) continue;
-          final localId = localIdMap[entry.key];
-          if (localId == null) continue;
-          final file = localIdToFile[localId];
-          if (file != null) {
-            clusterFiles.add(file);
-          }
-        }
-      } else {
-        clusterFiles = files
-            .where(
-              (file) =>
-                  fileIdsToClusterIds[file.uploadedFileID]?.contains(
-                    clusterID,
-                  ) ??
-                  false,
-            )
-            .toList();
-      }
+      final clusterFiles = await BodyRecognitionService.instance
+          .filesForCluster(clusterID, files);
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(

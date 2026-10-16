@@ -22,6 +22,44 @@ BodyDetection body(String id, {String? face, double cosine = 1}) =>
 void main() {
   const time = 1700000000000000;
   test(
+    "unnamed-cluster body rejections survive naming without claiming a stranger",
+    () {
+      final rejected = BodyDetection.fromJson({
+        ...body("body:3_1").toJson(),
+        "rejectedAnchorFaceIDs": ["1_face"],
+      });
+      final indices = {
+        1: BodyIndex(1000, 1000, [body("body:1_1", face: "1_face")]),
+        2: BodyIndex(1000, 1000, [
+          body("body:2_1", face: "2_face", cosine: 0.9),
+        ]),
+        3: BodyIndex(1000, 1000, [rejected]),
+      };
+      for (final identity in ["cluster:unnamed", "named-person"]) {
+        expect(
+          matchBodyDetections(
+            indices,
+            {1: time, 2: time, 3: time},
+            {"1_face": identity, "2_face": "another-person"},
+          ),
+          isEmpty,
+        );
+      }
+      expect(rejected.toJson()["rejectedAnchorFaceIDs"], ["1_face"]);
+    },
+  );
+
+  test("malformed stable anchor rejections do not enter the body index", () {
+    expect(
+      () => BodyDetection.fromJson({
+        ...body("body:3_1").toJson(),
+        "rejectedAnchorFaceIDs": [42],
+      }),
+      throwsFormatException,
+    );
+  });
+
+  test(
     "body matching uses face anchors and a three-hour microsecond window",
     () {
       final indices = {

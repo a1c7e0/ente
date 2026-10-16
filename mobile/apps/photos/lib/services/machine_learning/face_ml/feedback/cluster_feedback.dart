@@ -335,6 +335,8 @@ class ClusterFeedbackService<T> {
     }
     _logger.info('removeFilesFromCluster called');
     try {
+      final removedBodyFiles = await BodyRecognitionService.instance
+          .rejectClusterMemberships(files, clusterID);
       final faceIDs = await mlDataDB
           .getFaceIDsForCluster(clusterID)
           .then((iterable) => iterable.toList());
@@ -345,6 +347,16 @@ class ClusterFeedbackService<T> {
       final embeddings = await mlDataDB.getFaceEmbeddingMapForFaces(faceIDs);
 
       if (faceIDs.isEmpty || embeddings.isEmpty) {
+        if (removedBodyFiles.isNotEmpty) {
+          Bus.instance.fire(
+            PeopleChangedEvent(
+              relevantFiles: removedBodyFiles,
+              type: PeopleEventType.removedFilesFromCluster,
+              source: clusterID,
+            ),
+          );
+          if (faceIDs.isEmpty) return;
+        }
         _logger.severe(
           'No faces or embeddings found for cluster $clusterID that match the given files',
         );

@@ -375,7 +375,10 @@ export const getAnnotatedFacesForFile = async (
     )) {
         if (match.fileID != file.id || !isAutomaticBodyMatch(match)) continue;
         const person = _state.peopleStateSnapshot?.people.find(
-            (p) => p.id == match.personID,
+            (p) =>
+                p.id == match.personID ||
+                (p.type == "cluster" &&
+                    `cluster:${p.cluster.id}` == match.personID),
         );
         if (person)
             sortableFaces.push([

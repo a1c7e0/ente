@@ -33,6 +33,7 @@ export const BodyDetection = z.looseObject({
         .refine((v) => v.some((x) => x != 0)),
     linkedFaceID: z.string().nullish(),
     groupID: z.string().startsWith("body-group:").optional(),
+    rejectedAnchorFaceIDs: z.array(z.string()).optional(),
     decisions: z
         .record(
             z.string(),
@@ -215,6 +216,11 @@ export const matchBodies = (
             if (body.linkedFaceID && facePersons.has(body.linkedFaceID))
                 continue;
             const scores = new Map<string, number>();
+            const rejectedPersons = new Set(
+                (body.rejectedAnchorFaceIDs ?? [])
+                    .map((id) => facePersons.get(id))
+                    .filter((id) => id !== undefined),
+            );
             for (const anchor of anchors) {
                 const at = time(anchor.fileID);
                 if (
@@ -230,7 +236,13 @@ export const matchBodies = (
             }
             const ranked = [...scores].sort((a, b) => b[1] - a[1]);
             const best = ranked[0];
-            if (!best || best[1] < 0.63 || body.decisions[best[0]]) continue;
+            if (
+                !best ||
+                best[1] < 0.63 ||
+                body.decisions[best[0]] ||
+                rejectedPersons.has(best[0])
+            )
+                continue;
             result.push({
                 fileID: index.fileID,
                 detection: body,
