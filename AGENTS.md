@@ -10,7 +10,7 @@ Run focused checks for each changed area: `flutter analyze` and `flutter test` i
 
 ## Branches and artifacts
 
-`main` is the personal integration branch. Keep diagnostic and reset tools on `feat/ml-lab`; promote them only when explicitly requested. Sync upstream through normal merges and preserve fork changes. Main publishes `server`/`web`; Lab publishes `server-ml-lab`/`web-ml-lab`. Both branches have path-filtered Photos APK builds. Reuse shared build workflows, keep branch packages and tags isolated, and select the correct branch for manual builds. Artifact publishing does not deploy services.
+`main` is the personal integration branch. Keep diagnostic and reset tools on `feat/ml-lab`; promote them only when explicitly requested. Sync upstream through normal merges and preserve fork changes. Publish `server`/`web` containers from `main` only; Lab container packages and Web reset controls are currently deferred. Both branches have path-filtered Photos APK builds. Reuse shared build workflows, keep branch packages and tags isolated, and select the correct branch for manual builds. Artifact publishing does not deploy services.
 
 ## ML constraints
 

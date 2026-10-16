@@ -2,7 +2,7 @@ name: "Publish GHCR (Web)"
 
 on:
     push:
-        branches: [main, feat/ml-lab]
+        branches: [main]
         paths:
             - '.dockerignore'
             - '.github/workflows/fork-publish-container.yml'
@@ -42,12 +42,9 @@ jobs:
                       .
 
     publish-fork:
-        if: github.repository != 'ente/ente' && github.event_name != 'schedule' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab')
+        if: github.repository != 'ente/ente' && github.event_name != 'schedule' && github.ref == 'refs/heads/main'
         uses: ./.github/workflows/fork-publish-container.yml
         with:
-            image: ${{ github.ref == 'refs/heads/feat/ml-lab' && 'web-ml-lab' || 'web' }}
-            kind: web
-            ml-lab: ${{ github.ref == 'refs/heads/feat/ml-lab' }}
-            publish-latest: true
+            image: web
             context: .
             dockerfile: web/Dockerfile

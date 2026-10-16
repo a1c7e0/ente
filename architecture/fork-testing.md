@@ -2,14 +2,14 @@
 
 ## Branches and builds
 
-`main` is the stable personal integration branch. Its Server and Web images publish as `ghcr.io/a1c7e0/server` and `ghcr.io/a1c7e0/web`. ML Lab changes live on `feat/ml-lab`; those builds publish as `ghcr.io/a1c7e0/server-ml-lab` and `ghcr.io/a1c7e0/web-ml-lab`. Both image workflows are path filtered for the server or web inputs they build. A push builds the matching branch image; a manual run builds the branch selected in the Actions UI. Builds publish a commit-SHA tag, with the branch's `latest` tag reserved for its own image name. They do not deploy to a running installation.
+`main` is the stable personal integration branch. Its Server and full Web images publish as `ghcr.io/a1c7e0/server` and `ghcr.io/a1c7e0/web`. ML Lab diagnostics and mobile reset controls live on `feat/ml-lab`. Separate `server-ml-lab`/`web-ml-lab` packages and Web reset controls are deferred; Lab APKs use the same Server as regular clients. Container publishing is restricted to `main`, including manual dispatch.
 
 | Branch | Server package | Full Web package | Photos APK release |
 | --- | --- | --- | --- |
 | `main` | `server` | `web` | `photos-main-test` |
-| `feat/ml-lab` | `server-ml-lab` | `web-ml-lab` | `photos-ml-lab-test` |
+| `feat/ml-lab` | Uses main's Server | Uses main's Web | `photos-ml-lab-test` |
 
-Image names above use the `ghcr.io/a1c7e0/` prefix. Pull `:latest` for the current successful build in that channel or use an immutable commit-SHA tag. The packages remain isolated even when the two branches share the same Server code. The Lab Web build enables `NEXT_PUBLIC_ENTE_ML_LAB=true` at build time; changing a running container's environment cannot enable this compiled UI.
+Image names use the `ghcr.io/a1c7e0/` prefix. Pull `:latest` for the current successful main build or use a commit-SHA tag for a fixed version. Workflow runs publish artifacts; they do not deploy to a running installation.
 
 The dedicated fork Photos APK workflow is path filtered on both branches and can also be run manually with either branch selected. It uploads branch-specific artifacts and refreshes the `photos-main-test` or `photos-ml-lab-test` prerelease. The ML Lab APK uses `io.ente.photos.dev.debug`; the main test APK uses `io.ente.photos.dev`. The fork APKs have a temporary CI signature. To install successive builds as updates, re-sign them with the same persistent local development key. The upstream Photos build workflow is separate and should be disabled in this fork's Actions settings to avoid duplicate nightly/release runs. A workflow run builds and publishes artifacts; installing an APK or replacing a container is a separate operator action.
 
@@ -29,7 +29,7 @@ Publish any additional application ports you need. The Web image retains upstrea
 - Web watches `web/**`, `rust/**`, `.dockerignore`, its publishing YAML, and the shared container workflow. Rust is a shared build input for WebAssembly.
 - APK watches `mobile/apps/photos/**`, `mobile/packages/**`, the mobile workspace manifest/lockfile and analysis options, `rust/**`, Flutter setup, and its own workflow.
 
-All three filter pushes to `main` and `feat/ml-lab`; a documentation-only commit does not trigger them. Manual dispatch bypasses path filtering and uses the selected branch. Check the workflow's `paths` for the authoritative list.
+Container workflows filter pushes to `main`; the APK workflow filters both `main` and `feat/ml-lab`. Documentation-only commits do not trigger builds. Manual APK dispatch bypasses path filtering and uses the selected branch; container dispatch is restricted to main. Check the workflow's `paths` for the authoritative list.
 
 The upstream `server-publish-ghcr.yml` and `web-publish-ghcr.yml` remain the entry points. Their fork job calls `fork-publish-container.yml`, a reusable workflow added by this fork. It builds natively on amd64 and arm64, checks the images, then publishes their combined manifest. Fork jobs skip upstream schedules and official production-commit lookup. The upstream `photos-build.yml` is preserved unchanged but disabled in this fork; `fork-photos-apk.yml` builds the fork's two APK channels. GitHub Actions is the execution platform, a workflow is a YAML process, and an Action such as `actions/checkout` is one reusable step within that process.
 
@@ -41,7 +41,7 @@ Body recognition is client-side processing with encrypted mldata; it does not re
 
 ## ML testing scope
 
-Run body inference from mobile or desktop. Photos Web retains upstream's desktop-only ML support: Web builds expose ML Lab metadata and reset controls but do not run browser inference. Mobile and desktop inference follows normal photo indexing. Missing body data alone does not start a historical rescan.
+Run body inference from mobile or desktop. Photos Web retains upstream's desktop-only ML support: Web builds retain the regular UI and do not add reset controls or browser inference. Mobile and desktop inference follows normal photo indexing. Missing body data alone does not start a historical rescan.
 
 The diagnostic APK uses a separate application ID and local database; it cannot read local-only ML data from another installed app. Account-backed metadata arrives through normal encrypted sync. Anonymous local-gallery indexing can run inference and save local-gallery indexes, but grouping, crops, and review still use uploaded file IDs and the account ML database. Named people and person suggestions retain upstream account requirements. Do not extend anonymous mode with save or review operations.
 
