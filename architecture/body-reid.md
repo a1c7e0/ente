@@ -149,6 +149,74 @@ claim. Clients that do not understand this optional field preserve it with the
 rest of the body metadata. Existing account/local-mode edit restrictions remain
 in force.
 
+## Differences from reid-demo
+
+The integration retains OSNet-AIN x1.0, geometric face/body association, the
+0.74 attachment threshold, 0.05 ambiguity margin, 0.63 review threshold,
+three-hour capture-time guard and same-photo identity exclusion. It reuses
+Ente's generic person/pet detector rather than adding the demo's separate
+person-detector runtime. It does not replace Ente's face model or clustering.
+
+The attachment algorithm is deliberately not identical to the demo. The demo's
+`fusion.body_attach` compares a candidate time against the mean of an identity's
+seed timestamps within a pass, then immediately appends accepted body vectors
+as additional matching evidence. Ente compares each candidate against individual
+face-linked body anchors within three hours and never promotes an automatic
+body attachment into a new anchor. Missing/nonpositive timestamps are excluded.
+Review grouping additionally uses complete-link similarity >=0.8 with pairwise
+three-hour bounds, so a similarity chain cannot bridge dissimilar endpoints.
+The demo's legacy/fused configuration entries are not all active attachment
+rules and were not copied wholesale. Bounded two/three-hop propagation remains
+an evaluated proposal, not enabled behavior.
+
+## Storage and review rendering
+
+Mobile stores each photo's body index as JSON TEXT in the existing ML database's
+`body_index` table. The JSON contains 512-dimensional vectors as numbers, boxes,
+IDs, model/schema versions and review feedback. Desktop stores the corresponding
+structured indexes in IndexedDB. Rendered body crops are local cache files, not
+new fields or image bytes in mldata. Remote mldata already goes through gzip
+before encryption on both clients.
+
+As a size illustration, the first 100 vectors in the production-model Market-1501
+evaluation output (`float32`, 512 dimensions) occupy 7,291–8,120 bytes as compact
+Python JSON (median 7,647.5), compared with 2,048 bytes as raw float32. Gzipping
+those individual JSON arrays gives a median 3,483.5 bytes. Actual Dart/JavaScript
+serialization, vector values, multiple detections per photo, metadata, SQLite
+pages and whole-mldata compression change these sizes. The sample is not a
+measurement of a user's database or an exact remote-storage estimate. Mobile
+also retains raw JSON and parsed objects for matching; large libraries therefore
+have additional memory and full-index-read costs beyond the on-disk text.
+
+Body review previously regenerated crops outside the face crop cache, including
+when suggestions were prefetched. It also resolved derived group membership
+repeatedly. Mobile now passes detection boxes through the existing crop memory
+and temporary disk caches, source-image retrieval, isolate generator and bounded
+queues. In-flight body requests coalesce, and body tasks have separate IDs from
+face tasks for the same file. The full-file/thumbnail preference is honored.
+Matching/grouping caches invalidate when their underlying input changes; feedback
+still resolves and validates current group membership before writing anything.
+Desktop body crops reuse the existing `face-crops` blob cache (OPFS on Desktop,
+Cache API in browsers), in-flight request coalescing and object-URL lifecycle.
+Neither path introduces synthetic Face or Person records or a new ML schema.
+Cached crops consume additional local cache space, using the existing cache
+locations and cleanup lifecycle; this is not a zero-storage-cost optimization.
+
+The first uncached remote preview may still need source download and image
+decoding. Matching still reads whole body indexes, and Mobile matching runs in
+the Dart isolate. These changes remove redundant crop/group work, not every
+large-library bottleneck; no real-phone before/after latency is claimed.
+A follow-up can add per-file/incremental reads and time-indexed candidate lookup.
+Local-only float32 BLOB/typed-array storage merits a measured migration proposal;
+changing canonical cloud vector encoding or adding FP16/int8 quantization requires
+separate compatibility and accuracy review. No format or precision change is
+included here.
+
+Review retains the existing layout, controls and full-body `contain` fit. A
+body-only reduction of the face crop's generous padding could improve subject
+size within each tile, but should be compared visually before changing the crop
+primitive. A new review screen or different button workflow is unnecessary.
+
 ## Review
 
 The existing Mobile suggestion views and Desktop person review dialog render

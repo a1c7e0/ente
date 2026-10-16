@@ -13,11 +13,10 @@ import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
-import "package:photos/services/machine_learning/face_thumbnail_generator.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
 import "package:photos/services/search_service.dart";
 import "package:photos/src/rust/api/ml_indexing_api.dart" as rust;
-import "package:photos/utils/ml_util.dart";
+import "package:photos/utils/face/face_thumbnail_cache.dart";
 
 class BodyRecognitionService {
   static final instance = BodyRecognitionService._();
@@ -28,6 +27,8 @@ class BodyRecognitionService {
   int _indexRevision = 0;
   String? _matchKey;
   List<BodyMatch> _matches = const [];
+  String? _groupMatchKey;
+  List<BodyGroup> _groups = const [];
 
   Future<BodyIndex> analyze(int fileID, String path, List<Face> faces) async {
     final result = await rust.analyzeBodiesRust(
@@ -118,6 +119,7 @@ class BodyRecognitionService {
     _rawIndexes = data;
     _parsedIndexes = result;
     _indexRevision++;
+    _groupMatchKey = null;
     return result;
   }
 
@@ -131,7 +133,11 @@ class BodyRecognitionService {
     if (isLocalGalleryMode) return [];
     final db = MLDataDB.instance;
     final indices = await indexes();
-    if (indices.isEmpty) return [];
+    if (indices.isEmpty) {
+      _matchKey = null;
+      _matches = const [];
+      return [];
+    }
     final facePersons = <String, String>{};
     final persons = await PersonService.instance.getPersonsMap();
     for (final person in persons.values) {
@@ -172,12 +178,23 @@ class BodyRecognitionService {
   }
 
   Future<List<BodyGroup>> groups(List<EnteFile> files) async {
-    final keyedFiles = await filesByKey(files);
-    return groupBodyMatches(await matches(files), {
-      for (final entry in keyedFiles.entries)
-        if (entry.value.creationTime != null)
-          entry.key: entry.value.creationTime!,
-    });
+    final matchesForFiles = await matches(files);
+    final matchKey = _matchKey;
+    if (isLocalGalleryMode || matchKey == null) {
+      _groups = const [];
+      _groupMatchKey = null;
+      return _groups;
+    }
+    if (_groupMatchKey != matchKey) {
+      final keyedFiles = await filesByKey(files);
+      _groups = groupBodyMatches(matchesForFiles, {
+        for (final entry in keyedFiles.entries)
+          if (entry.value.creationTime != null)
+            entry.key: entry.value.creationTime!,
+      });
+      _groupMatchKey = matchKey;
+    }
+    return _groups;
   }
 
   Future<List<EnteFile>> filesForCluster(
@@ -523,19 +540,38 @@ class BodyRecognitionService {
     await updateDecision(file, bodyID, person.remoteID, null);
   }
 
-  Future<Map<int, Uint8List?>> crop(EnteFile file, String bodyID) async {
-    final keyedFiles = await filesByKey([file]);
-    if (keyedFiles.isEmpty) return {};
-    final fileID = keyedFiles.keys.single;
+  Future<Map<int, Uint8List?>> crop(
+    EnteFile file,
+    String reference, {
+    bool useFullFile = true,
+  }) async {
+    final fileID = file.uploadedFileID;
+    if (fileID == null) return {};
     final index = (await indexes())[fileID];
     if (index == null) return {};
-    final members = await groupMembers(bodyID);
-    final body = members.firstWhere((m) => m.$1 == fileID).$2;
-    final crops = await FaceThumbnailGenerator.instance.generateFaceThumbnails(
-      await getImagePathForML(file),
-      [body.box],
-    );
-    // Existing thumbnail consumers use the first crop; the key is the ML key.
-    return {fileID: crops.first};
+    BodyDetection? body;
+    for (final detection in index.detections) {
+      if (detection.bodyID == reference || detection.groupID == reference) {
+        body = detection;
+        break;
+      }
+    }
+    if (body == null) {
+      // Reuse suggestion membership for rendering. Feedback still resolves and
+      // validates the current group before changing any assignments.
+      if (_groupMatchKey == _matchKey && _matchKey != null) {
+        for (final group in _groups) {
+          if (group.id != reference) continue;
+          for (final match in group.matches) {
+            if (match.fileID == fileID) body = match.detection;
+          }
+        }
+      }
+      body ??= (await groupMembers(
+        reference,
+      )).firstWhere((member) => member.$1 == fileID).$2;
+    }
+    final crops = await getCachedBodyCrop(file, body, useFullFile: useFullFile);
+    return {fileID: crops?[body.bodyID]};
   }
 }

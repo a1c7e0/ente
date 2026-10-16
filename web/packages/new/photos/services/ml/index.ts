@@ -24,7 +24,7 @@ import {
 import { deleteUserEntity } from "../user-entity/remote";
 import { bodyGroupWithID, splitBodyGroup } from "./body-review";
 import type { ClusterFacesReason, FaceCluster } from "./cluster";
-import { regenerateFaceCrops } from "./crop";
+import { bodyCropBlob, regenerateFaceCrops } from "./crop";
 import { clearMLDB, savedFaceIndex, savedIndexCounts } from "./db";
 import { fileIDFromFaceID } from "./face";
 import {
@@ -47,6 +47,7 @@ class MLState {
     peopleStateListeners: (() => void)[] = [];
     peopleStateSnapshot: PeopleState | undefined;
     inFlightFaceCropRegens = new Map<number, Promise<void>>();
+    inFlightBodyFaceCrops = new Map<string, Promise<string | undefined>>();
     faceCropObjectURLCache = new Map<string, string>();
 }
 
@@ -403,23 +404,34 @@ export const getAnnotatedFacesForFile = async (
 
 export const faceCrop = async (faceID: string, file: EnteFile) => {
     if (faceID.startsWith("body:")) {
-        const cached = _state.faceCropObjectURLCache.get(faceID);
+        const state = _state;
+        const cached = state.faceCropObjectURLCache.get(faceID);
         if (cached) return cached;
-        const { bodyWithID } = await import("./body-review");
-        const { extractFaceCrop } = await import("./crop");
-        const { fetchRenderableEnteFileBlob } = await import("./blob");
-        const { detection } = await bodyWithID(faceID);
-        const bitmap = await createImageBitmap(
-            await fetchRenderableEnteFileBlob(file),
-        );
+
+        let inFlight = state.inFlightBodyFaceCrops.get(faceID);
+        if (!inFlight) {
+            inFlight = (async () => {
+                const { bodyWithID } = await import("./body-review");
+                const { detection } = await bodyWithID(faceID);
+                const blob = await bodyCropBlob(faceID, file, detection.box);
+                const url = URL.createObjectURL(blob);
+                // A crop can finish after logoutML has replaced the state.
+                // Do not leak its URL into the new session's cache.
+                if (_state !== state) {
+                    URL.revokeObjectURL(url);
+                    return undefined;
+                }
+                state.faceCropObjectURLCache.set(faceID, url);
+                return url;
+            })();
+            state.inFlightBodyFaceCrops.set(faceID, inFlight);
+        }
+
         try {
-            const url = URL.createObjectURL(
-                await extractFaceCrop(bitmap, detection.box),
-            );
-            _state.faceCropObjectURLCache.set(faceID, url);
-            return url;
+            return await inFlight;
         } finally {
-            bitmap.close();
+            if (state.inFlightBodyFaceCrops.get(faceID) === inFlight)
+                state.inFlightBodyFaceCrops.delete(faceID);
         }
     }
     // Returned object URLs are cache-owned; callers must not revoke them.
