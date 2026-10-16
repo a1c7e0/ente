@@ -76,9 +76,13 @@ body detections, with mean matched IoU 0.900. All body embeddings had 512 finite
 values and unit norm within 1e-5; all boxes were within [0, 1]. Normal face
 association retained 509 body detections and excluded 54 ambiguous detections.
 
-The strict annotation-based precision was 73.7%. This dataset omits some small
-or occluded background people, so unmatched boxes include real, unannotated
-people as well as possible false detections. These numbers describe the raw
+The annotation-match fraction was 73.7%. The release contains 345 original
+annotations plus 78 supplemental small/occluded people. Its readme describes the
+supplemental labels, while generic annotation comments still warn about possible
+omissions. Unmatched boxes can include real people, partial/duplicate boxes and
+false detections; they must not all be counted as false person detections. See the
+[quality-gate evaluation](body-reid-quality-evaluation.md) for size distributions,
+face-association stratification and threshold comparisons. These numbers describe the raw
 detector on this dataset, not mobile stored-index recall or general accuracy.
 The dataset is not an identity-labeled ReID evaluation; it does not establish
 body grouping, review accuracy, or phone battery/performance characteristics.
