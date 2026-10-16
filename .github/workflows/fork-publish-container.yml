@@ -6,6 +6,15 @@ on:
             image:
                 type: string
                 required: true
+            kind:
+                type: string
+                required: true
+            ml-lab:
+                type: boolean
+                default: false
+            publish-latest:
+                type: boolean
+                default: false
             context:
                 type: string
                 required: true
@@ -58,7 +67,9 @@ jobs:
                   platforms: linux/${{ matrix.arch }}
                   push: true
                   tags: ${{ env.CONTAINER_IMAGE }}:${{ github.sha }}-${{ matrix.arch }}
-                  build-args: GIT_COMMIT=${{ github.sha }}
+                  build-args: |
+                      GIT_COMMIT=${{ github.sha }}
+                      NEXT_PUBLIC_ENTE_ML_LAB=${{ inputs.ml-lab }}
                   labels: |
                       org.opencontainers.image.source=https://github.com/${{ github.repository }}
                       org.opencontainers.image.revision=${{ github.sha }}
@@ -66,7 +77,7 @@ jobs:
                   cache-to: type=gha,mode=max,scope=${{ inputs.image }}-${{ matrix.arch }}
 
             - name: Verify server executable
-              if: inputs.image == 'server'
+              if: inputs.kind == 'server'
               env:
                   ARCH: ${{ matrix.arch }}
               run: |
@@ -75,7 +86,7 @@ jobs:
                       -c 'test -x /museum && test -d /migrations && test -d /configurations'
 
             - name: Verify all Web apps serve HTTP
-              if: inputs.image == 'web'
+              if: inputs.kind == 'web'
               env:
                   ARCH: ${{ matrix.arch }}
               run: |
@@ -113,9 +124,11 @@ jobs:
             - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
             - name: Publish multi-platform manifest
+              env:
+                  PUBLISH_LATEST: ${{ inputs.publish-latest }}
               run: |
                   tags=(--tag "${CONTAINER_IMAGE}:${GITHUB_SHA}")
-                  if [ "$GITHUB_REF" = refs/heads/main ]; then
+                  if [ "$PUBLISH_LATEST" = true ]; then
                       tags+=(--tag "${CONTAINER_IMAGE}:latest")
                   fi
                   docker buildx imagetools create "${tags[@]}" \

@@ -1,0 +1,173 @@
+name: "Build fork Photos APK"
+
+on:
+    push:
+        branches: [main, feat/ml-lab]
+        paths:
+            - '.github/workflows/fork-photos-apk.yml'
+            - '.github/actions/setup-flutter/**'
+            - 'mobile/apps/photos/**'
+            - 'mobile/packages/**'
+            - 'mobile/pubspec.*'
+            - 'mobile/analysis_options.yaml'
+            - 'rust/**'
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+concurrency:
+    group: fork-photos-apk-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        if: github.repository == 'a1c7e0/ente' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab')
+        runs-on: ubuntu-24.04
+        timeout-minutes: 90
+        env:
+            APK_CHANNEL: ${{ github.ref == 'refs/heads/feat/ml-lab' && 'ml-lab' || 'main' }}
+            ML_DIAGNOSTICS: ${{ github.ref == 'refs/heads/feat/ml-lab' }}
+            CARGO_BUILD_JOBS: 2
+            CARGO_INCREMENTAL: 0
+            SIGNING_KEY_ALIAS: photos-test
+            SIGNING_KEY_PASSWORD: android
+            SIGNING_STORE_PASSWORD: android
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+                  submodules: recursive
+
+            - name: Setup JDK 17
+              uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+              with:
+                  distribution: temurin
+                  java-version: "17"
+
+            - name: Setup Flutter
+              uses: ./.github/actions/setup-flutter
+
+            - name: Prepare Android and Rust toolchains
+              run: |
+                  sudo rm -rf /usr/share/dotnet
+                  rustup update stable
+                  rustup default stable
+                  rustup target add aarch64-linux-android
+                  sdkmanager_path="$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -n 1)"
+                  test -n "$sdkmanager_path"
+                  "$sdkmanager_path" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
+
+            - name: Resolve locked Photos dependencies
+              working-directory: mobile/apps/photos
+              run: flutter pub get --enforce-lockfile
+
+            - name: Generate Flutter bindings
+              working-directory: rust
+              run: cargo codegen frb photos
+
+            - name: Verify mobile diagnostics
+              working-directory: mobile/apps/photos
+              run: |
+                  flutter analyze --no-pub
+                  flutter test --no-pub test/models/ml/body_test.dart test/models/ml/body_file_data_test.dart test/models/ml/ml_metadata_update_test.dart test/ui/viewer/people/body_crop_test.dart
+
+            - name: Verify ML Lab diagnostics
+              if: github.ref == 'refs/heads/feat/ml-lab'
+              working-directory: mobile/apps/photos
+              run: flutter test --no-pub test/ui/settings/debug test/services/machine_learning/body_association_test.dart test/ui/viewer/people/body_crop_cache_test.dart
+
+            - name: Verify mobile model download selection
+              if: github.ref == 'refs/heads/feat/ml-lab'
+              working-directory: rust
+              env:
+                  CARGO_PROFILE_DEV_DEBUG: 0
+                  CARGO_PROFILE_TEST_DEBUG: 0
+              run: cargo test --locked -p ente-photos-frb --lib mobile_downloads_include_bodies_and_deduplicate_the_pet_detector
+
+            - name: Prepare development signature and arm64 packaging
+              run: |
+                  export SIGNING_KEY_PATH="$RUNNER_TEMP/photos-test.jks"
+                  printf 'SIGNING_KEY_PATH=%s\n' "$SIGNING_KEY_PATH" >> "$GITHUB_ENV"
+                  keytool -genkeypair -keystore "$SIGNING_KEY_PATH" -storepass android -keypass android -alias "$SIGNING_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Ente Photos Test APK"
+                  mkdir -p "$HOME/.gradle/init.d"
+                  echo 'org.gradle.workers.max=2' >> "$HOME/.gradle/gradle.properties"
+                  cat > "$HOME/.gradle/init.d/photos-arm64.gradle" <<'EOF'
+                  allprojects { p ->
+                      if (p.rootDir.canonicalPath != new File(System.getenv('GITHUB_WORKSPACE'), 'mobile/apps/photos/android').canonicalPath) return
+                      p.afterEvaluate {
+                          if (p.path == ':app') {
+                              def android = p.extensions.findByName('android')
+                              android.defaultConfig.ndk.abiFilters.clear()
+                              android.buildTypes.each { it.ndk.abiFilters.clear() }
+                          }
+                      }
+                  }
+                  EOF
+
+            - name: Build Photos arm64 release APK
+              working-directory: mobile/apps/photos
+              run: flutter build apk --release --flavor dev --target-platform android-arm64 --split-per-abi --dart-define=cronetHttpNoPlay=true --dart-define=enteMLDiagnostics=$ML_DIAGNOSTICS --build-number=$((1000000 + GITHUB_RUN_NUMBER))
+
+            - name: Collect APK
+              env:
+                  BUILT_SHA: ${{ github.sha }}
+              run: |
+                  mkdir artifacts
+                  python3 - <<'PYTHON'
+                  from pathlib import Path
+                  import shutil
+                  import os
+                  output = Path('mobile/apps/photos/build/app/outputs/flutter-apk')
+                  candidates = list(output.glob('app-*arm64-v8a*release.apk'))
+                  assert len(candidates) == 1, list(output.glob('*.apk'))
+                  print(f'Collecting {candidates[0]}')
+                  shutil.copyfile(candidates[0], f"artifacts/ente-photos-{os.environ['APK_CHANNEL']}-arm64.apk")
+                  PYTHON
+                  printf '%s\n' "$BUILT_SHA" > artifacts/COMMIT
+                  cd artifacts
+                  sha256sum "ente-photos-${APK_CHANNEL}-arm64.apk" > SHA256SUMS
+
+            - name: Verify locked dependencies
+              run: git diff --exit-code -- mobile/pubspec.lock
+
+            - name: Verify artifact
+              run: |
+                  "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "artifacts/ente-photos-${APK_CHANNEL}-arm64.apk" > artifacts/SIGNATURE.txt
+                  cat artifacts/SIGNATURE.txt
+                  "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "artifacts/ente-photos-${APK_CHANNEL}-arm64.apk"
+                  python3 - <<'PYTHON'
+                  import zipfile
+                  import os
+                  with zipfile.ZipFile(f"artifacts/ente-photos-{os.environ['APK_CHANNEL']}-arm64.apk") as apk:
+                      assert apk.testzip() is None, 'APK ZIP integrity check failed'
+                      libraries = [p for p in apk.namelist() if p.startswith('lib/') and p.endswith('.so')]
+                      print('Native libraries:', libraries)
+                      assert {p.split('/')[1] for p in libraries} == {'arm64-v8a'}, libraries
+                      assert 'lib/arm64-v8a/libente_photos_frb.so' in libraries
+                      assert 'lib/arm64-v8a/libonnxruntime.so' in libraries
+                  PYTHON
+
+            - name: Upload APK
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+              with:
+                  name: ente-photos-${{ env.APK_CHANNEL }}-arm64
+                  path: artifacts/
+                  if-no-files-found: error
+                  retention-days: 7
+
+            - name: Publish test APK to Releases
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+              run: |
+                  tag="photos-${APK_CHANNEL}-test"
+                  notes="Photos ${APK_CHANNEL} arm64 test candidate built from ${GITHUB_SHA}. CI uses a temporary test signature; updating a locally re-signed installation requires re-signing this APK with the same local key. See architecture/fork-testing.md."
+                  if gh release view "$tag" >/dev/null 2>&1; then
+                      gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/${tag}" -f sha="$GITHUB_SHA" -F force=true
+                      gh release upload "$tag" artifacts/* --clobber
+                      gh release edit "$tag" --notes "$notes"
+                  else
+                      gh release create "$tag" artifacts/* --target "$GITHUB_SHA" --title "Photos ${APK_CHANNEL} arm64 test APK" --notes "$notes" --prerelease --latest=false
+                  fi

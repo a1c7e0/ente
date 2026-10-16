@@ -2,7 +2,7 @@ name: "Publish GHCR (Server)"
 
 on:
     push:
-        branches: [main]
+        branches: [main, feat/ml-lab]
         paths:
             - '.github/workflows/fork-publish-container.yml'
             - '.github/workflows/server-publish-ghcr.yml'
@@ -60,9 +60,12 @@ jobs:
                       server
 
     publish-fork:
-        if: github.repository != 'ente/ente' && github.event_name != 'schedule'
+        if: github.repository != 'ente/ente' && github.event_name != 'schedule' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab')
         uses: ./.github/workflows/fork-publish-container.yml
         with:
-            image: server
+            image: ${{ github.ref == 'refs/heads/feat/ml-lab' && 'server-ml-lab' || 'server' }}
+            kind: server
+            ml-lab: ${{ github.ref == 'refs/heads/feat/ml-lab' }}
+            publish-latest: true
             context: server
             dockerfile: server/Dockerfile
