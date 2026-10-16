@@ -9,8 +9,18 @@ void main() {
     tester,
   ) async {
     for (final (model, title) in [
-      ("body-detection", "Body Detection Model"),
+      ("body-detection", "Person & Pet Detection Model"),
+      ("pet-body-detection", "Person & Pet Detection Model"),
       ("body-embedding", "Body Embedding Model"),
+      ("face-detection", "Face Detection Model"),
+      ("face-embedding", "Face Embedding Model"),
+      ("pet-face-detection", "Pet Face Detection Model"),
+      ("pet-face-embedding-dog", "Dog Face Embedding Model"),
+      ("pet-face-embedding-cat", "Cat Face Embedding Model"),
+      ("pet-body-embedding-dog", "Dog Body Embedding Model"),
+      ("pet-body-embedding-cat", "Cat Body Embedding Model"),
+      ("clip-image", "Image Model"),
+      ("clip-text", "Text Model"),
     ]) {
       await tester.pumpWidget(
         MaterialApp(

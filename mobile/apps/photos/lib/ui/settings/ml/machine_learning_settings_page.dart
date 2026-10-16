@@ -351,7 +351,9 @@ class _ModelLoadingStateState extends State<ModelLoadingState> {
   }
 
   void _recordProgress(String model, int downloaded, int total) {
-    _progressMap[model] = (downloaded, total);
+    // Human and pet body detection share one downloaded model asset.
+    final key = model == "pet-body-detection" ? "body-detection" : model;
+    _progressMap[key] = (downloaded, total);
   }
 
   @override
@@ -437,10 +439,10 @@ class ModelDownloadProgressRow extends StatelessWidget {
       "clip-text" => "Text Model",
       "face-detection" => "Face Detection Model",
       "face-embedding" => "Face Embedding Model",
-      "body-detection" => "Body Detection Model",
+      "body-detection" ||
+      "pet-body-detection" => "Person & Pet Detection Model",
       "body-embedding" => "Body Embedding Model",
       "pet-face-detection" => "Pet Face Detection Model",
-      "pet-body-detection" => "Pet Body Detection Model",
       "pet-face-embedding-dog" => "Dog Face Embedding Model",
       "pet-face-embedding-cat" => "Cat Face Embedding Model",
       "pet-body-embedding-dog" => "Dog Body Embedding Model",
