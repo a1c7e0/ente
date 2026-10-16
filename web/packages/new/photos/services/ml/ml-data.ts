@@ -5,6 +5,7 @@ import type { EnteFile } from "ente-media/file";
 import { nullToUndefined } from "ente-utils/transform";
 import { z } from "zod";
 import { gunzipWithLimit, gzip } from "../../utils/gzip";
+import { BodyIndex, compactBodyIndex } from "./body";
 import type { RemoteCLIPIndex } from "./clip";
 import {
     faceDetectionModel,
@@ -130,13 +131,18 @@ const putMLData = async (
     file: EnteFile,
     mlData: RawRemoteMLData,
     lastUpdatedAt: number,
-) =>
-    putFileData(
+) => {
+    const body = BodyIndex.safeParse(mlData.body);
+    const data = body.success
+        ? { ...mlData, body: compactBodyIndex(body.data) }
+        : mlData;
+    return putFileData(
         file,
         "mldata",
-        await gzip(JSON.stringify(mlData)),
+        await gzip(JSON.stringify(data)),
         lastUpdatedAt,
     );
+};
 
 export const updateMLData = (
     file: EnteFile,

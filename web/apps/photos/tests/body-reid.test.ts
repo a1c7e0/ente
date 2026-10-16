@@ -1,8 +1,10 @@
 import type { EnteFile } from "ente-media/file";
 import {
     BodyIndex,
+    bodyEmbeddingPrecision,
     bodyIndexingVersion,
     bodyModel,
+    compactBodyIndex,
     isAutomaticBodyMatch,
     linkBodyFaces,
     matchBodies,
@@ -47,6 +49,25 @@ const file = (id: number, seconds = 0) =>
     }) as EnteFile;
 
 describe("body evidence", () => {
+    test("compacts vectors while retaining the existing numeric array shape", () => {
+        const source = index(1, [
+            detection("body:1_1", null, [
+                0.12345678,
+                -0.00789123,
+                ...Array<number>(510).fill(0),
+            ]),
+        ]);
+        const compact = compactBodyIndex(source);
+
+        expect(compact.embeddingPrecision).toBe(bodyEmbeddingPrecision);
+        expect(compact.detections[0]!.embedding).toEqual([
+            0.1235,
+            -0.007891,
+            ...Array<number>(510).fill(0),
+        ]);
+        expect(BodyIndex.safeParse(compact).success).toBe(true);
+    });
+
     test("attaches a back view to a face-anchored person inside three hours", () => {
         const matches = matchBodies(
             [

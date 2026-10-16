@@ -98,6 +98,7 @@ class BodyRecognitionService {
 
   Future<Map<int, BodyIndex>> indexes() async {
     final data = await MLDataDB.instance.bodyIndexes();
+    if (identical(data, _rawIndexes)) return _parsedIndexes;
     if (data.length == _rawIndexes.length &&
         data.entries.every((e) => _rawIndexes[e.key] == e.value)) {
       return _parsedIndexes;

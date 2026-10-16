@@ -8,7 +8,12 @@ import {
     type BodyDetection,
     type LocalBodyIndex,
 } from "./body";
-import { saveBodyIndex, savedBodyIndexes, savedFaceClusters } from "./db";
+import {
+    saveBodyIndex,
+    savedBodyIndexRevision,
+    savedBodyIndexes,
+    savedFaceClusters,
+} from "./db";
 import { updateMLData } from "./ml-data";
 import type { CGroupPerson, PreviewableCluster } from "./people";
 
@@ -32,11 +37,9 @@ export const currentBodyMatches = async (files: EnteFile[]) => {
                 facePersons.set(faceID, `cluster:${cluster.id}`);
         }
     }
-    const indexes = (await savedBodyIndexes()).filter(
-        (i) => BodyIndex.safeParse(i).success,
-    );
+    const bodyIndexRevision = await savedBodyIndexRevision();
     const key = JSON.stringify([
-        indexes,
+        bodyIndexRevision,
         files
             .map((f) => [
                 f.id,
@@ -48,6 +51,9 @@ export const currentBodyMatches = async (files: EnteFile[]) => {
         [...facePersons].sort((a, b) => a[0].localeCompare(b[0])),
     ]);
     if (key != matchCacheKey) {
+        const indexes = (await savedBodyIndexes()).filter(
+            (i) => BodyIndex.safeParse(i).success,
+        );
         matchCache = matchBodies(indexes, files, facePersons);
         matchCacheKey = key;
     }

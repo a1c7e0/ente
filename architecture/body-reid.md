@@ -90,7 +90,7 @@ guarantees than the underlying protocol.
 Mobile appends migration 17 to both Dart and Rust SQLite schemas, adding
 `body_index(file_id, data, ml_version)` to the existing ML databases, including
 the separate local-gallery database. Its JSON contains the body subtype and
-review decisions. Desktop upgrades the existing `ml` IndexedDB to version 2,
+review decisions. Desktop upgrades the existing `ml` IndexedDB to version 3,
 adding a `body-index` store. Face/CLIP records are not rebuilt by this migration.
 
 Body completion is recorded independently of face/CLIP completion, but does not
@@ -131,6 +131,34 @@ Automatic memberships are derived locally and merged into person photo queries,
 counts and the photo information panel. They are not written into
 `manuallyAssigned`. A previous positive human decision suppresses automatic
 reassignment, including after the old photo tag or person is removed.
+
+## Storage and review rendering
+
+Mobile stores each photo's body index as JSON TEXT in the existing ML database's
+`body_index` table. The JSON contains 512-dimensional vectors as numbers, boxes,
+IDs, model/schema versions and review feedback. Desktop stores the corresponding
+structured indexes in IndexedDB. Rendered body crops are local cache files, not
+image bytes in mldata. Remote mldata already goes through gzip before encryption.
+
+Newly written vectors are rounded to four significant decimal digits and retain
+the existing numeric-array shape. A precision marker is informational; older
+body clients still read ordinary numbers. On 7,877 production OSNet vectors from
+Market-1501, mean absolute pairwise cosine change was `9.4e-6` (maximum
+`6.7e-5`). Across 62,047,129 pairs, 62 crossed the 0.74 match cutoff and 20
+crossed the 0.8 review-group cutoff. In a 500-vector, one-body-per-photo sample,
+median gzipped body metadata fell from 3,728 to 1,390 bytes (63%). These
+measurements estimate vector-heavy metadata; real albums vary.
+
+The Penn-Fudan gate sweep found that stricter size/confidence filters save only
+about 6–9% of detections while losing some annotated people. The current
+thresholds remain unchanged: precision rounding reduces vector payload without
+suppressing small detections.
+
+Mobile now reuses parsed body indexes until a body-index write or delete changes
+the local snapshot. Desktop tracks a lightweight body-index revision and reloads
+the full set only when that revision changes. This avoids rereading and
+stringifying every embedding for each review request. Matching still runs after
+relevant ML or feedback changes; no real-phone before/after timing is claimed.
 
 ## Review
 
