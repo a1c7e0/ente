@@ -199,6 +199,11 @@ re-reading and stringifying every embedding whenever body review suggestions are
 requested. The app still computes matches after relevant ML or feedback changes;
 no real-phone before/after timing is claimed.
 
+A host-side synthetic review benchmark used 7,877 one-detection indexes with
+the measured vectors (29.3 MB of JSON). Building the previous full review cache
+key with `JSON.stringify` took 248 ms median and 262 ms p95 on this host. This
+is not an Android timing; it shows the repeated work the revision cache removes.
+
 Body review previously regenerated crops outside the face crop cache, including
 when suggestions were prefetched. It also resolved derived group membership
 repeatedly. Mobile now passes detection boxes through the existing crop memory
