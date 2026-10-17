@@ -22,7 +22,7 @@ jobs:
             CARGO_INCREMENTAL: 0
             CARGO_PROFILE_DEV_DEBUG: 0
             CARGO_PROFILE_TEST_DEBUG: 0
-            SIGNING_KEY_ALIAS: ${{ secrets.PHOTOS_TEST_KEY_ALIAS || 'photos-test' }}
+            SIGNING_KEY_ALIAS: ${{ secrets.PHOTOS_TEST_KEY_ALIAS || 'ente-photos-test' }}
             SIGNING_KEY_PASSWORD: ${{ secrets.PHOTOS_TEST_KEY_PASSWORD || 'android' }}
             SIGNING_STORE_PASSWORD: ${{ secrets.PHOTOS_TEST_KEYSTORE_PASSWORD || 'android' }}
             SIGNING_KEYSTORE_BASE64: ${{ secrets.PHOTOS_TEST_KEYSTORE_BASE64 }}
@@ -44,6 +44,40 @@ jobs:
                       mobile/apps/photos/android/gradle/wrapper/gradle-wrapper.properties
                       mobile/gradle/**
                       mobile/pubspec.lock
+
+            - name: Prepare persistent test signature and arm64 packaging
+              run: |
+                  export SIGNING_KEY_PATH="$RUNNER_TEMP/photos-test.jks"
+                  printf 'SIGNING_KEY_PATH=%s\n' "$SIGNING_KEY_PATH" >> "$GITHUB_ENV"
+                  if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
+                      test -n "$SIGNING_KEY_ALIAS" || { echo 'Missing PHOTOS_TEST_KEY_ALIAS repository secret' >&2; exit 1; }
+                      test -n "$SIGNING_KEY_PASSWORD" || { echo 'Missing PHOTOS_TEST_KEY_PASSWORD repository secret' >&2; exit 1; }
+                      test -n "$SIGNING_STORE_PASSWORD" || { echo 'Missing PHOTOS_TEST_KEYSTORE_PASSWORD repository secret' >&2; exit 1; }
+                      printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$SIGNING_KEY_PATH"
+                      echo "Using the persistent Photos test signing key."
+                  else
+                      keytool -genkeypair -keystore "$SIGNING_KEY_PATH" -storepass "$SIGNING_STORE_PASSWORD" -keypass "$SIGNING_KEY_PASSWORD" -alias "$SIGNING_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Ente Photos Test APK"
+                      echo "::warning::Persistent APK updates are disabled until PHOTOS_TEST_KEYSTORE_BASE64 and its related repository secrets are configured."
+                  fi
+                  chmod 600 "$SIGNING_KEY_PATH"
+                  if ! keytool -list -keystore "$SIGNING_KEY_PATH" -storepass:env SIGNING_STORE_PASSWORD -alias "$SIGNING_KEY_ALIAS" > /dev/null; then
+                      echo "::error::Signing keystore validation failed. Set PHOTOS_TEST_KEY_ALIAS to the alias stored in your keystore and check PHOTOS_TEST_KEYSTORE_PASSWORD."
+                      exit 1
+                  fi
+                  mkdir -p "$HOME/.gradle/init.d"
+                  echo 'org.gradle.workers.max=2' >> "$HOME/.gradle/gradle.properties"
+                  cat > "$HOME/.gradle/init.d/photos-arm64.gradle" <<'EOF'
+                  allprojects { p ->
+                      if (p.rootDir.canonicalPath != new File(System.getenv('GITHUB_WORKSPACE'), 'mobile/apps/photos/android').canonicalPath) return
+                      p.afterEvaluate {
+                          if (p.path == ':app') {
+                              def android = p.extensions.findByName('android')
+                              android.defaultConfig.ndk.abiFilters.clear()
+                              android.buildTypes.each { it.ndk.abiFilters.clear() }
+                          }
+                      }
+                  }
+                  EOF
 
             - name: Setup Flutter
               uses: ./.github/actions/setup-flutter
@@ -133,36 +167,6 @@ jobs:
                   path: |
                       ~/.cargo/registry
                       ~/.cargo/git
-
-            - name: Prepare persistent test signature and arm64 packaging
-              run: |
-                  export SIGNING_KEY_PATH="$RUNNER_TEMP/photos-test.jks"
-                  printf 'SIGNING_KEY_PATH=%s\n' "$SIGNING_KEY_PATH" >> "$GITHUB_ENV"
-                  if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
-                      test -n "$SIGNING_KEY_ALIAS" || { echo 'Missing PHOTOS_TEST_KEY_ALIAS repository secret' >&2; exit 1; }
-                      test -n "$SIGNING_KEY_PASSWORD" || { echo 'Missing PHOTOS_TEST_KEY_PASSWORD repository secret' >&2; exit 1; }
-                      test -n "$SIGNING_STORE_PASSWORD" || { echo 'Missing PHOTOS_TEST_KEYSTORE_PASSWORD repository secret' >&2; exit 1; }
-                      printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$SIGNING_KEY_PATH"
-                      echo "Using the persistent Photos test signing key."
-                  else
-                      keytool -genkeypair -keystore "$SIGNING_KEY_PATH" -storepass "$SIGNING_STORE_PASSWORD" -keypass "$SIGNING_KEY_PASSWORD" -alias "$SIGNING_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Ente Photos Test APK"
-                      echo "::warning::Persistent APK updates are disabled until PHOTOS_TEST_KEYSTORE_BASE64 and its related repository secrets are configured."
-                  fi
-                  chmod 600 "$SIGNING_KEY_PATH"
-                  mkdir -p "$HOME/.gradle/init.d"
-                  echo 'org.gradle.workers.max=2' >> "$HOME/.gradle/gradle.properties"
-                  cat > "$HOME/.gradle/init.d/photos-arm64.gradle" <<'EOF'
-                  allprojects { p ->
-                      if (p.rootDir.canonicalPath != new File(System.getenv('GITHUB_WORKSPACE'), 'mobile/apps/photos/android').canonicalPath) return
-                      p.afterEvaluate {
-                          if (p.path == ':app') {
-                              def android = p.extensions.findByName('android')
-                              android.defaultConfig.ndk.abiFilters.clear()
-                              android.buildTypes.each { it.ndk.abiFilters.clear() }
-                          }
-                      }
-                  }
-                  EOF
 
             - name: Build Photos arm64 release APK
               working-directory: mobile/apps/photos
