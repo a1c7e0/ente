@@ -12,6 +12,7 @@ import "package:photos/models/ml/face/box.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
+import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
 import "package:photos/services/search_service.dart";
@@ -384,12 +385,18 @@ class BodyRecognitionService {
     );
     // Check all current partitions before introducing any manual photo tags.
     final ids = files.keys.toList();
+    final checkedMetadata = <int, FileDataEntity>{};
     for (int start = 0; start < ids.length; start += 200) {
       final end = start + 200 < ids.length ? start + 200 : ids.length;
       final batch = ids.sublist(start, end).toSet();
       final response = await fileDataService.getFilesData(batch);
       if (response.fetchErrorFileIDs.isNotEmpty) {
         throw StateError("Metadata fetch failed");
+      }
+      // Retain at most one batch of snapshots for reuse during the write phase.
+      for (final entry in response.data.entries) {
+        if (checkedMetadata.length >= 200) break;
+        checkedMetadata[entry.key] = entry.value;
       }
       for (final member in members.where((m) => batch.contains(m.$1))) {
         final index = response.data[member.$1]?.bodyIndex;
@@ -403,29 +410,81 @@ class BodyRecognitionService {
       personID: person.remoteID,
       fileIDs: files.keys.toSet(),
     );
-    for (final member in members) {
-      if (!files.containsKey(member.$1)) continue;
-      await _updateBody(files[member.$1]!, member.$2.bodyID, (body) {
-        body.bindReviewGroup(reference);
-        final previous = body.decisions[person.remoteID];
-        body.decisions[person.remoteID] = {
-          "status": "accepted",
-          "addedManual":
-              assigned.addedFileIds.contains(member.$1) ||
-              (previous is Map && previous["addedManual"] == true),
-        };
-      });
-    }
+    await _updateGroup(files, members, (fileID, body) {
+      body.bindReviewGroup(reference);
+      final previous = body.decisions[person.remoteID];
+      body.decisions[person.remoteID] = {
+        "status": "accepted",
+        "addedManual":
+            assigned.addedFileIds.contains(fileID) ||
+            (previous is Map && previous["addedManual"] == true),
+      };
+    }, initialMetadata: checkedMetadata);
   }
 
   Future<void> rejectGroup(String personID, String reference) async {
-    for (final member in await groupMembers(reference)) {
-      final file = await FilesDB.instance.getAnyUploadedFile(member.$1);
-      if (file == null) continue;
-      await _updateBody(file, member.$2.bodyID, (body) {
-        body.bindReviewGroup(reference);
-        body.decisions[personID] = {"status": "rejected"};
-      });
+    final members = await groupMembers(reference);
+    final files = await FilesDB.instance.getFileIDToFileFromIDs(
+      members.map((m) => m.$1).toList(),
+    );
+    await _updateGroup(files, members, (_, body) {
+      body.bindReviewGroup(reference);
+      body.decisions[personID] = {"status": "rejected"};
+    });
+  }
+
+  Future<void> _updateGroup(
+    Map<int, EnteFile> files,
+    List<(int, BodyDetection)> members,
+    void Function(int, BodyDetection) update, {
+    Map<int, FileDataEntity>? initialMetadata,
+  }) async {
+    final bodiesByFile = <int, Set<String>>{};
+    for (final member in members) {
+      if (files.containsKey(member.$1)) {
+        bodiesByFile.putIfAbsent(member.$1, () => {}).add(member.$2.bodyID);
+      }
+    }
+    final fileIDs = bodiesByFile.keys.toList();
+    // Different files are independent. Keep each file's changes in a single
+    // conflict-checked update so two bodies never race over the same mldata.
+    const batchSize = 4;
+    for (var start = 0; start < fileIDs.length; start += batchSize) {
+      final end = start + batchSize < fileIDs.length
+          ? start + batchSize
+          : fileIDs.length;
+      final batch = fileIDs.sublist(start, end);
+      final metadata = <int, FileDataEntity>{
+        for (final id in batch)
+          if (initialMetadata?[id] != null) id: initialMetadata![id]!,
+      };
+      final missing = batch.where((id) => !metadata.containsKey(id)).toSet();
+      if (missing.isNotEmpty) {
+        final response = await fileDataService.getFilesData(missing);
+        if (response.fetchErrorFileIDs.isNotEmpty) {
+          throw StateError("Metadata fetch failed");
+        }
+        metadata.addAll(response.data);
+      }
+      await Future.wait(
+        batch.map((fileID) async {
+          final entity = await fileDataService.updateFileData(files[fileID]!, (
+            latest,
+          ) {
+            final index = latest.bodyIndex;
+            if (index == null) throw StateError("Body index is unavailable");
+            for (final bodyID in bodiesByFile[fileID]!) {
+              update(
+                fileID,
+                index.detections.firstWhere((b) => b.bodyID == bodyID),
+              );
+            }
+            latest.putBody(index);
+            return true;
+          }, initialData: metadata[fileID]);
+          await store(MLDataDB.instance, fileID, entity.bodyIndex!);
+        }),
+      );
     }
   }
 
