@@ -19,6 +19,7 @@ import 'package:photos/models/ml/face/face.dart';
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/entity_service.dart";
+import "package:photos/services/machine_learning/body_person_reset_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/photos_contacts_service.dart";
 import "package:photos/settings/local_settings.dart";
@@ -596,6 +597,11 @@ class PersonService {
     }
 
     Bus.instance.fire(PeopleChangedEvent());
+  }
+
+  Future<void> resetPerson(String personID) async {
+    await BodyPersonResetService.instance.clearReviewData(personID);
+    await deletePerson(personID);
   }
 
   Future<bool> _pullAndApplyRemotePersons({

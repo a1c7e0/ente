@@ -533,7 +533,7 @@ class _AppBarWidgetState extends State<PeopleAppBar> {
       firstButtonLabel: context.strings.yesResetPerson,
       firstButtonOnTap: () async {
         try {
-          await PersonService.instance.deletePerson(person.remoteID);
+          await PersonService.instance.resetPerson(person.remoteID);
           if (!context.mounted) return;
           Navigator.of(context).pop();
         } catch (e, s) {
