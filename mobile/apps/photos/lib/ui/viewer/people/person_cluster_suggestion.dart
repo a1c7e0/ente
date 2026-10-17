@@ -301,11 +301,13 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
         await ClusterFeedbackService.instance.addClusterToExistingPerson(
           person: widget.person,
           clusterID: clusterID,
+          bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
         );
       } else {
         await ClusterFeedbackService.instance.rejectSuggestion(
           personID: widget.person.remoteID,
           clusterID: clusterID,
+          bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
         );
       }
       if (!mounted) return;
@@ -376,6 +378,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
         await ClusterFeedbackService.instance.addClusterToExistingPerson(
           person: selected,
           clusterID: clusterID,
+          bodyDetectionsByFile: currentSuggestion.bodyDetectionsByFile,
         );
       }
       if (result == null || result == false) {
