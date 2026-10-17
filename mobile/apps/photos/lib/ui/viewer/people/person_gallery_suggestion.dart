@@ -1,5 +1,4 @@
 import "dart:async";
-import "dart:typed_data";
 
 import "package:ente_strings/ente_strings.dart";
 import 'package:flutter/material.dart';
@@ -14,11 +13,12 @@ import "package:photos/services/machine_learning/face_ml/person/person_service.d
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/face_thumbnail_squircle.dart";
-import "package:photos/ui/viewer/people/file_face_widget.dart";
 import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
+import "package:photos/ui/viewer/people/review_thumbnail.dart";
+import "package:photos/ui/viewer/people/review_thumbnail_loader.dart";
 import "package:photos/ui/viewer/people/save_or_edit_person.dart";
-import "package:photos/utils/face/face_thumbnail_cache.dart";
+import "package:photos/utils/dialog_util.dart";
 
 final _logger = Logger("PersonGallerySuggestion");
 
@@ -41,12 +41,13 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     with TickerProviderStateMixin {
   List<ClusterSuggestion> allSuggestions = [];
   int currentSuggestionIndex = 0;
-  Map<int, Uint8List?> faceCrops = {};
+  ReviewThumbnails faceCrops = {};
   bool isLoading = true;
   bool isProcessing = false;
   bool isPreparingNext = false;
   bool hasCurrentSuggestion = false;
-  Map<int, Map<int, Uint8List?>> precomputedFaceCrops = {};
+  late ReviewThumbnailLoader _thumbnailLoader;
+  Object? _thumbnailError;
   late final StreamSubscription<PeopleChangedEvent> _peopleChangedEvent;
   int _suggestionLoadID = 0;
 
@@ -63,6 +64,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   void initState() {
     super.initState();
     person = widget.person;
+    _thumbnailLoader = ReviewThumbnailLoader(personPage ? 4 : 3);
     _initializeAnimations();
     _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen((event) {
       if (personPage &&
@@ -116,14 +118,10 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         allSuggestions = suggestions;
         currentSuggestionIndex = 0;
 
-        final crops = await _generateFaceThumbnails(
-          allSuggestions[0].filesInCluster.take(personPage ? 4 : 3).toList(),
-          allSuggestions[0].clusterIDToMerge,
-        );
+        if (!await _prepareSuggestionAt(0, loadID)) return;
 
         if (mounted && loadID == _suggestionLoadID) {
           setState(() {
-            faceCrops = crops;
             isLoading = false;
             hasCurrentSuggestion = true;
           });
@@ -136,16 +134,14 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
           unawaited(_fadeController?.forward());
           unawaited(_slideController?.forward());
         }
-
-        unawaited(_precomputeNextSuggestions(loadID));
       } else {
         _logger.info("No suggestions found");
         if (mounted && loadID == _suggestionLoadID) {
+          _thumbnailLoader.prefetch(const []);
           setState(() {
             allSuggestions = [];
             currentSuggestionIndex = 0;
             faceCrops = {};
-            precomputedFaceCrops = {};
             isLoading = false;
             isProcessing = false;
             isPreparingNext = false;
@@ -158,12 +154,16 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       if (mounted && loadID == _suggestionLoadID) {
         setState(() {
           isLoading = false;
+          _thumbnailError = e;
         });
       }
     }
   }
 
   Future<void> _reloadSuggestions() async {
+    _thumbnailLoader.dispose();
+    _thumbnailLoader = ReviewThumbnailLoader(personPage ? 4 : 3);
+    _thumbnailError = null;
     _slideController?.reset();
     _fadeController?.reset();
     if (mounted) {
@@ -175,55 +175,41 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         allSuggestions = [];
         currentSuggestionIndex = 0;
         faceCrops = {};
-        precomputedFaceCrops = {};
       });
     }
     await _loadInitialSuggestion();
   }
 
-  Future<void> _precomputeNextSuggestions([int? expectedLoadID]) async {
-    final loadID = expectedLoadID ?? _suggestionLoadID;
-    try {
-      const maxPrecompute = 2;
-      final endIndex = (currentSuggestionIndex + maxPrecompute).clamp(
-        0,
-        allSuggestions.length,
-      );
-
-      for (int i = currentSuggestionIndex + 1; i < endIndex; i++) {
-        if (!mounted || loadID != _suggestionLoadID) break;
-
-        final suggestion = allSuggestions[i];
-        final crops = await _generateFaceThumbnails(
-          suggestion.filesInCluster.take(personPage ? 4 : 3).toList(),
-          suggestion.clusterIDToMerge,
-        );
-
-        if (mounted && loadID == _suggestionLoadID) {
-          precomputedFaceCrops[i] = crops;
-        }
-      }
-    } catch (e, s) {
-      _logger.severe("Error precomputing next suggestions", e, s);
+  Future<bool> _prepareSuggestionAt(int index, int loadID) async {
+    final prepared = await _thumbnailLoader.next(allSuggestions.skip(index));
+    if (!mounted || loadID != _suggestionLoadID || prepared == null) {
+      return false;
     }
+    final selectedIndex = allSuggestions.indexOf(prepared.suggestion, index);
+    final selected = allSuggestions.removeAt(selectedIndex);
+    allSuggestions.insert(index, selected);
+    faceCrops = prepared.thumbnails;
+    person = selected.person;
+    _thumbnailError = null;
+    _thumbnailLoader.prefetch(allSuggestions.skip(index + 1));
+    return true;
   }
 
-  Future<Map<int, Uint8List?>> _generateFaceThumbnails(
-    List<EnteFile> files,
-    String clusterID,
-  ) async {
-    final futures = <Future<Uint8List?>>[];
-    for (final file in files) {
-      futures.add(
-        precomputeClusterFaceCrop(file, clusterID, useFullFile: true),
-      );
+  Future<void> _retryThumbnails() async {
+    final loadID = _suggestionLoadID;
+    _thumbnailLoader.retryFailures();
+    setState(() {
+      _thumbnailError = null;
+      isLoading = true;
+    });
+    if (allSuggestions.isEmpty) {
+      await _loadInitialSuggestion();
+      return;
     }
-    final faceCropsList = await Future.wait(futures);
-    final faceCrops = <int, Uint8List?>{};
-    for (var i = 0; i < faceCropsList.length; i++) {
-      faceCrops[files[i].uploadedFileID!] = faceCropsList[i];
+    await _prepareNextSuggestion(advance: false);
+    if (mounted && loadID == _suggestionLoadID) {
+      setState(() => isLoading = false);
     }
-    return faceCrops;
   }
 
   Future<void> _navigateToCluster() async {
@@ -262,13 +248,14 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       return;
     }
 
+    final loadID = _suggestionLoadID;
     setState(() {
       isProcessing = true;
     });
 
     try {
       await _animateOut();
-      if (!mounted) {
+      if (!mounted || loadID != _suggestionLoadID) {
         return;
       }
       setState(() {
@@ -277,7 +264,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       await _prepareNextSuggestion();
     } catch (e, s) {
       _logger.severe("Error consuming suggestion after external action", e, s);
-      if (mounted) {
+      if (mounted && loadID == _suggestionLoadID) {
         setState(() {
           isProcessing = false;
         });
@@ -292,6 +279,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       return;
     }
 
+    final loadID = _suggestionLoadID;
     setState(() {
       isProcessing = true;
     });
@@ -305,7 +293,15 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
             )
           : _captureNotPersonFeedback(currentSuggestion);
 
-      await Future.wait([_animateOut(), feedbackFuture]);
+      await Future.wait([
+        _animateOut().then((_) {
+          if (mounted && loadID == _suggestionLoadID) {
+            setState(() => hasCurrentSuggestion = false);
+          }
+        }),
+        feedbackFuture,
+      ]);
+      if (!mounted || loadID != _suggestionLoadID) return;
       if (mounted) {
         setState(() {
           hasCurrentSuggestion = false;
@@ -314,22 +310,25 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       await _prepareNextSuggestion();
     } catch (e, s) {
       _logger.severe("Error handling user choice", e, s);
-      if (mounted) {
+      if (mounted && loadID == _suggestionLoadID) {
         setState(() {
           isProcessing = false;
+          hasCurrentSuggestion = true;
         });
+        await _animateIn();
+        if (mounted) await showGenericErrorDialog(context: context, error: e);
       }
     }
   }
 
   Future<void> _captureNotPersonFeedback(ClusterSuggestion suggestion) async {
     await ClusterFeedbackService.instance.rejectSuggestion(
-      personID: relevantPerson.remoteID,
+      personID: suggestion.person.remoteID,
       clusterID: suggestion.clusterIDToMerge,
     );
     Bus.instance.fire(
       PeopleChangedEvent(
-        person: relevantPerson,
+        person: suggestion.person,
         source: suggestion.clusterIDToMerge,
       ),
     );
@@ -341,6 +340,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         currentSuggestionIndex >= allSuggestions.length) {
       return;
     }
+    final loadID = _suggestionLoadID;
     setState(() {
       isProcessing = true;
     });
@@ -378,6 +378,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
           clusterID: clusterID,
         );
       }
+      if (!mounted || loadID != _suggestionLoadID) return;
       if (result == null || result == false) {
         unawaited(_animateIn());
         if (mounted) {
@@ -388,6 +389,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         return;
       }
       await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted || loadID != _suggestionLoadID) return;
       if (mounted) {
         setState(() {
           hasCurrentSuggestion = false;
@@ -397,44 +399,38 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       await _prepareNextSuggestion();
     } catch (e, s) {
       _logger.severe("Error handling user choice", e, s);
-      if (mounted) {
+      if (mounted && loadID == _suggestionLoadID) {
         setState(() {
           isProcessing = false;
+          hasCurrentSuggestion = true;
         });
+        await _animateIn();
+        if (mounted) await showGenericErrorDialog(context: context, error: e);
       }
     }
   }
 
-  Future<void> _prepareNextSuggestion() async {
+  Future<void> _prepareNextSuggestion({bool advance = true}) async {
     if (!mounted) return;
 
-    currentSuggestionIndex++;
+    if (advance) currentSuggestionIndex++;
 
     if (currentSuggestionIndex < allSuggestions.length) {
-      person = allSuggestions[currentSuggestionIndex].person;
+      final loadID = _suggestionLoadID;
       try {
-        Map<int, Uint8List?> nextCrops;
-        if (precomputedFaceCrops.containsKey(currentSuggestionIndex)) {
-          nextCrops = precomputedFaceCrops[currentSuggestionIndex]!;
-        } else {
-          final nextSuggestion = allSuggestions[currentSuggestionIndex];
-          nextCrops = await _generateFaceThumbnails(
-            nextSuggestion.filesInCluster.take(personPage ? 4 : 3).toList(),
-            nextSuggestion.clusterIDToMerge,
-          );
-        }
+        if (!await _prepareSuggestionAt(currentSuggestionIndex, loadID)) return;
         if (mounted) {
           setState(() {
-            faceCrops = nextCrops;
             isProcessing = false;
             isPreparingNext = false;
             hasCurrentSuggestion = true;
           });
           await _animateIn();
-          unawaited(_precomputeNextSuggestions());
         }
       } catch (e, s) {
         _logger.severe("Error preparing next suggestion", e, s);
+        if (!mounted || loadID != _suggestionLoadID) return;
+        _thumbnailError = e;
         if (mounted) {
           setState(() {
             isProcessing = false;
@@ -477,6 +473,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   @override
   void dispose() {
     _suggestionLoadID++;
+    _thumbnailLoader.dispose();
     _peopleChangedEvent.cancel();
     _slideController?.dispose();
     _fadeController?.dispose();
@@ -485,6 +482,21 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
 
   @override
   Widget build(BuildContext context) {
+    if (_thumbnailError != null) {
+      return Center(
+        child: TextButton.icon(
+          onPressed: _retryThumbnails,
+          icon: const Icon(Icons.refresh),
+          label: Text(context.strings.retry),
+        ),
+      );
+    }
+    if (isLoading || (!hasCurrentSuggestion && isProcessing)) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
     if (isLoading ||
         allSuggestions.isEmpty ||
         currentSuggestionIndex >= allSuggestions.length ||
@@ -696,7 +708,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     final start = personPage ? 0 : -1;
     for (int i = start; i < files.length; i++) {
       EnteFile? file;
-      Uint8List? faceCrop;
+      ReviewThumbnail? faceCrop;
       if (i != -1) {
         file = files[i];
         faceCrop = faceCrops[file.uploadedFileID!];
@@ -722,15 +734,13 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
                         personId: suggestPerson.remoteID,
                         key: ValueKey('person_${suggestPerson.remoteID}'),
                       )
-                    : FileFaceWidget(
-                        key: ValueKey(
-                          'face_${currentSuggestionIndex}_${file!.uploadedFileID}',
-                        ),
-                        file,
-                        faceCrop: faceCrop,
-                        clusterID: currentSuggestion.clusterIDToMerge,
-                        useFullFile: true,
-                        thumbnailFallback: true,
+                    : ReviewThumbnailWidget(
+                        faceCrop!,
+                        key: ValueKey((
+                          currentSuggestion.person.remoteID,
+                          currentSuggestion.clusterIDToMerge,
+                          file!.uploadedFileID,
+                        )),
                       ),
               ),
             ),

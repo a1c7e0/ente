@@ -167,9 +167,40 @@ is not an Android timing; it shows the repeated work the revision cache removes.
 
 ## Review
 
+### Mobile review loading and feedback
+
+Both Mobile review surfaces select a fully prepared candidate before a pending
+candidate, independently of whether it contains faces or bodies. Cards prefetch
+two upcoming groups (one more than upstream). The independent review screen
+keeps the upstream look-ahead of five groups and an eight-image budget, fitting
+complete groups within that budget. A group becomes ready only after all its
+representative images decode successfully. Pending work is reused; failed loads
+remain retryable rather than counting as successful reviews. Stable person,
+cluster and representative-file keys prevent reordered candidates from sharing
+the wrong images. Undo explicitly restores the last reviewed candidate. Reloads
+and disposal invalidate pending UI results.
+
+Body review uses the gallery thumbnail download/decryption/cache path and the
+body boxes already carried by suggestions. It does not fetch originals or rerun
+matching merely to render a tile. Face review keeps its existing crop source.
+Accept/reject metadata changes are grouped by file, read in bounded batches and
+written with at most four files concurrently. Already fetched versioned metadata
+can supply the first write attempt; conflicts still fetch and merge the latest
+object through `FileDataService.updateFileData`. At most 200 validation snapshots
+are retained. Existing/unknown subtypes and manual-assignment ownership fields
+are preserved. Switching still waits for persistence, and multi-file feedback is
+not a server transaction.
+
+Run focused regressions from `mobile/apps/photos`:
+
+```sh
+flutter test --no-pub test/ui/viewer/people/review_thumbnail_queue_test.dart test/ui/viewer/people/review_thumbnail_test.dart test/models/ml/ml_metadata_update_test.dart
+```
+
 The existing Mobile suggestion views and Desktop person review dialog render
-body crops in the same thumbnail positions. The original face suggestions,
-sorting and handlers retain their behavior. A `body:` candidate reference routes
+body previews in the same thumbnail positions. Face candidate generation and
+ranking retain their behavior; Mobile display order can advance a ready group
+as described above. A `body:` candidate reference routes
 only the storage operation and crop source to the body extension.
 
 - Accept: retain the body decision and use the existing manual-photo assignment
@@ -207,6 +238,14 @@ Mobile face suggestion rejection also records rejected face IDs through the
 existing cgroup/person sync path. Session undo removes only the rejections that
 operation introduced. Face identity assignments continue to use cgroups, not a
 second identity registry inside face mldata.
+
+Manual account-backed checks: review with a mixture of cached and uncached
+face/body suggestions; confirm a ready group advances before a slow one. Undo
+must restore the actual previous group. Open mixed grouping, remove a member and
+return to verify that it no longer appears. Check portrait/wide/edge body boxes
+for matching photo and dim-window alignment. Test a larger group's accept/reject
+against a throttled server and verify persistence from a second client. These
+checks require a real account/device; unit tests do not establish phone latency.
 
 ## Verification
 

@@ -70,16 +70,28 @@ class FileDataService {
     EnteFile file,
     FutureOr<bool> Function(FileDataEntity) update, {
     DataType type = DataType.mlData,
+    FileDataEntity? initialData,
   }) async {
     final fileID = file.uploadedFileID!;
+    if (initialData != null &&
+        (initialData.fileID != fileID || initialData.type != type)) {
+      throw ArgumentError("Metadata snapshot does not match the file and type");
+    }
     for (int attempt = 0; attempt < 3; attempt++) {
-      final response = await getFilesData({fileID}, type: type);
-      if (response.fetchErrorFileIDs.contains(fileID)) {
-        throw StateError("Metadata fetch failed");
+      // A caller that already batch-fetched metadata can reuse that version on
+      // the first attempt. Conflicts still fetch and merge the latest object.
+      FileDataEntity? entity = attempt == 0 && initialData?.updatedAt != null
+          ? initialData
+          : null;
+      if (entity == null) {
+        final response = await getFilesData({fileID}, type: type);
+        if (response.fetchErrorFileIDs.contains(fileID)) {
+          throw StateError("Metadata fetch failed");
+        }
+        entity =
+            response.data[fileID] ??
+            (FileDataEntity.empty(fileID, type)..updatedAt = 0);
       }
-      final entity =
-          response.data[fileID] ??
-          (FileDataEntity.empty(fileID, type)..updatedAt = 0);
       if (!await update(entity)) return entity;
       try {
         await putFileData(file, entity);

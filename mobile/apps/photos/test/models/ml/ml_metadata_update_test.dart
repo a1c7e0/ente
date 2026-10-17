@@ -13,31 +13,37 @@ class _MemoryMetadata extends FileDataService {
   Map<String, dynamic> data = {"face": "old", "body": "old", "future": 7};
   int stamp = 10;
   final writes = <int>[];
+  int reads = 0;
+  bool conflictFirstWrite = true;
+  String conflictingSubtype = "body";
   _MemoryMetadata(super.prefs, super.gateway);
 
   @override
   Future<FileDataResponse> getFilesData(
     Set<int> ids, {
     DataType type = DataType.mlData,
-  }) => Future.value(
-    FileDataResponse(
-      {
-        1: FileDataEntity.fromRemote(
-          1,
-          "mldata",
-          jsonDecode(jsonEncode(data)) as Map<String, dynamic>,
-        )..updatedAt = stamp,
-      },
-      fetchErrorFileIDs: {},
-      pendingIndexFileIDs: {},
-    ),
-  );
+  }) {
+    reads++;
+    return Future.value(
+      FileDataResponse(
+        {
+          1: FileDataEntity.fromRemote(
+            1,
+            "mldata",
+            jsonDecode(jsonEncode(data)) as Map<String, dynamic>,
+          )..updatedAt = stamp,
+        },
+        fetchErrorFileIDs: {},
+        pendingIndexFileIDs: {},
+      ),
+    );
+  }
 
   @override
   Future<void> putFileData(EnteFile file, FileDataEntity entity) {
     writes.add(entity.updatedAt!);
-    if (writes.length == 1) {
-      data["body"] = "another-device";
+    if (conflictFirstWrite && writes.length == 1) {
+      data[conflictingSubtype] = "another-device";
       stamp = 20;
       final request = RequestOptions(path: "/files/data");
       return Future.error(
@@ -75,4 +81,64 @@ void main() {
       });
     },
   );
+  test(
+    "batch-fetched metadata avoids an extra read on a successful update",
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = _MemoryMetadata(
+        await SharedPreferences.getInstance(),
+        FileDataGateway(Dio()),
+      )..conflictFirstWrite = false;
+      final snapshot = (await service.getFilesData({1})).data[1]!;
+      await service.updateFileData(EnteFile()..uploadedFileID = 1, (latest) {
+        latest.remoteRawData["body"] = "reviewed";
+        return true;
+      }, initialData: snapshot);
+      expect(service.reads, 1);
+      expect(service.writes, [10]);
+      expect(service.data, {"face": "old", "body": "reviewed", "future": 7});
+    },
+  );
+
+  test(
+    "a conflicting batch snapshot refetches and preserves another device's update",
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final service = _MemoryMetadata(
+        await SharedPreferences.getInstance(),
+        FileDataGateway(Dio()),
+      )..conflictingSubtype = "face";
+      final snapshot = (await service.getFilesData({1})).data[1]!;
+      await service.updateFileData(EnteFile()..uploadedFileID = 1, (latest) {
+        latest.remoteRawData["body"] = "reviewed";
+        return true;
+      }, initialData: snapshot);
+      expect(service.reads, 2);
+      expect(service.writes, [10, 20]);
+      expect(service.data, {
+        "face": "another-device",
+        "body": "reviewed",
+        "future": 7,
+      });
+    },
+  );
+
+  test("a snapshot for another file is rejected before any request", () async {
+    SharedPreferences.setMockInitialValues({});
+    final service = _MemoryMetadata(
+      await SharedPreferences.getInstance(),
+      FileDataGateway(Dio()),
+    );
+    await expectLater(
+      service.updateFileData(
+        EnteFile()..uploadedFileID = 1,
+        (_) => true,
+        initialData: FileDataEntity.fromRemote(2, "mldata", {"future": 7})
+          ..updatedAt = 10,
+      ),
+      throwsArgumentError,
+    );
+    expect(service.reads, 0);
+    expect(service.writes, isEmpty);
+  });
 }

@@ -33,6 +33,9 @@ class ClusterSuggestion {
   final bool usedOnlyMeanForSuggestion;
   final List<EnteFile> filesInCluster;
   final List<String> faceIDsInCluster;
+  // Snapshot the suggested body boxes for rendering; writes still validate the
+  // current remote group before applying feedback.
+  final Map<int, BodyDetection> bodyDetectionsByFile;
 
   ClusterSuggestion(
     this.person,
@@ -40,8 +43,9 @@ class ClusterSuggestion {
     this.distancePersonToCluster,
     this.usedOnlyMeanForSuggestion,
     this.filesInCluster,
-    this.faceIDsInCluster,
-  );
+    this.faceIDsInCluster, {
+    this.bodyDetectionsByFile = const {},
+  });
 }
 
 class ClusterFeedbackService<T> {
@@ -449,6 +453,9 @@ class ClusterFeedbackService<T> {
           false,
           [for (final m in members) fileByID[m.fileID]!],
           const [],
+          bodyDetectionsByFile: {
+            for (final member in members) member.fileID: member.detection,
+          },
         ),
       );
     }

@@ -1,6 +1,5 @@
-import "dart:async" show StreamSubscription, unawaited;
+import "dart:async" show StreamSubscription;
 import "dart:math";
-import "dart:typed_data";
 
 import "package:ente_components/ente_components.dart";
 import "package:ente_strings/ente_strings.dart";
@@ -19,11 +18,12 @@ import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/face_thumbnail_squircle.dart";
-import "package:photos/ui/viewer/people/file_face_widget.dart";
 import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/person_clusters_page.dart";
+import "package:photos/ui/viewer/people/review_thumbnail.dart";
+import "package:photos/ui/viewer/people/review_thumbnail_loader.dart";
 import "package:photos/ui/viewer/people/save_or_edit_person.dart";
-import "package:photos/utils/face/face_thumbnail_cache.dart";
+import "package:photos/utils/dialog_util.dart";
 
 class SuggestionUserFeedback {
   final bool accepted;
@@ -44,8 +44,15 @@ class PersonReviewClusterSuggestion extends StatefulWidget {
 class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   int currentSuggestionIndex = 0;
   Key futureBuilderKeySuggestions = UniqueKey();
-  Key futureBuilderKeyFaceThumbnails = UniqueKey();
-  bool canGiveFeedback = true;
+  bool canGiveFeedback = false;
+  final _thumbnailLoader = ReviewThumbnailLoader(
+    6,
+    prefetchGroups: 5,
+    prefetchImageBudget: 8,
+  );
+  ReviewThumbnails _currentThumbnails = {};
+  int _suggestionLoadID = 0;
+  bool _restoringSuggestion = false;
   List<SuggestionUserFeedback> pastUserFeedback = [];
   List<ClusterSuggestion> allSuggestions = [];
   late final Logger _logger = Logger('_PersonClustersState');
@@ -62,6 +69,8 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
 
   @override
   void dispose() {
+    _suggestionLoadID++;
+    _thumbnailLoader.dispose();
     _peopleChangedEvent?.cancel();
     super.dispose();
   }
@@ -75,9 +84,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
           if (pastUserFeedback.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.undo_outlined),
-              onPressed: () async {
-                await _undoLastFeedback();
-              },
+              onPressed: canGiveFeedback ? _undoLastFeedback : null,
             ),
           IconButton(
             icon: const Icon(Icons.history_outlined),
@@ -116,12 +123,6 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
             final double distance = currentSuggestion.distancePersonToCluster;
             final bool usingMean = currentSuggestion.usedOnlyMeanForSuggestion;
             final List<EnteFile> files = currentSuggestion.filesInCluster;
-
-            final Future<Map<int, Uint8List?>> generateFacedThumbnails =
-                _generateFaceThumbnails(
-                  files.sublist(0, min(files.length, 6)),
-                  clusterID,
-                );
 
             _peopleChangedEvent?.cancel();
             _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen((
@@ -180,7 +181,6 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
                           usingMean,
                           files,
                           numberOfDifferentSuggestions,
-                          generateFacedThumbnails,
                         ),
                       ),
                     ),
@@ -263,7 +263,23 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
               snapshot.error!,
               snapshot.stackTrace,
             );
-            return const Center(child: Text("Error"));
+            return Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  _thumbnailLoader.retryFailures();
+                  if (allSuggestions.isEmpty) {
+                    setState(() {
+                      futureBuilderKeySuggestions = UniqueKey();
+                      _fetchClusterSuggestions();
+                    });
+                  } else {
+                    _prepareNextSuggestion();
+                  }
+                },
+                icon: const Icon(Icons.refresh),
+                label: Text(context.strings.retry),
+              ),
+            );
           } else {
             return const Center(child: CircularProgressIndicator());
           }
@@ -277,55 +293,40 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     bool yesOrNo,
     int numberOfSuggestions,
   ) async {
-    if (!canGiveFeedback) {
-      return;
-    }
-    pastUserFeedback.add(
-      SuggestionUserFeedback(yesOrNo, allSuggestions[currentSuggestionIndex]),
-    );
-    if (yesOrNo) {
-      canGiveFeedback = false;
-      await ClusterFeedbackService.instance.addClusterToExistingPerson(
-        person: widget.person,
-        clusterID: clusterID,
-      );
-      _notifySuggestionReviewed();
-      if (mounted) {
-        setState(() => currentSuggestionIndex++);
+    if (!canGiveFeedback) return;
+    final suggestion = allSuggestions[currentSuggestionIndex];
+    setState(() => canGiveFeedback = false);
+    try {
+      if (yesOrNo) {
+        await ClusterFeedbackService.instance.addClusterToExistingPerson(
+          person: widget.person,
+          clusterID: clusterID,
+        );
+      } else {
+        await ClusterFeedbackService.instance.rejectSuggestion(
+          personID: widget.person.remoteID,
+          clusterID: clusterID,
+        );
       }
-
-      if (currentSuggestionIndex >= (numberOfSuggestions)) {
+      if (!mounted) return;
+      pastUserFeedback.add(SuggestionUserFeedback(yesOrNo, suggestion));
+      _notifySuggestionReviewed();
+      if (yesOrNo) currentSuggestionIndex++;
+      if (!yesOrNo || currentSuggestionIndex >= numberOfSuggestions) {
         setState(() {
           currentSuggestionIndex = 0;
           futureBuilderKeySuggestions = UniqueKey();
-          futureBuilderKeyFaceThumbnails = UniqueKey();
           _fetchClusterSuggestions();
         });
       } else {
-        futureBuilderKeyFaceThumbnails = UniqueKey();
-        setState(() {});
+        _prepareNextSuggestion();
       }
-    } else {
-      await _rejectSuggestion(clusterID, numberOfSuggestions);
+    } catch (error, stack) {
+      _logger.severe("Error saving review feedback", error, stack);
+      if (!mounted) return;
+      setState(() => canGiveFeedback = true);
+      await showGenericErrorDialog(context: context, error: error);
     }
-  }
-
-  Future<void> _rejectSuggestion(
-    String clusterID,
-    int numberOfSuggestions,
-  ) async {
-    canGiveFeedback = false;
-    await ClusterFeedbackService.instance.rejectSuggestion(
-      personID: widget.person.remoteID,
-      clusterID: clusterID,
-    );
-    _notifySuggestionReviewed();
-    setState(() {
-      currentSuggestionIndex = 0;
-      futureBuilderKeySuggestions = UniqueKey();
-      futureBuilderKeyFaceThumbnails = UniqueKey();
-      _fetchClusterSuggestions();
-    });
   }
 
   void _notifySuggestionReviewed() {
@@ -381,20 +382,17 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
         return;
       }
       _notifySuggestionReviewed();
-      if (mounted) {
-        setState(() => currentSuggestionIndex++);
-      }
+      if (!mounted) return;
+      currentSuggestionIndex++;
       final numberOfSuggestions = allSuggestions.length;
       if (currentSuggestionIndex >= numberOfSuggestions) {
         setState(() {
           currentSuggestionIndex = 0;
           futureBuilderKeySuggestions = UniqueKey();
-          futureBuilderKeyFaceThumbnails = UniqueKey();
           _fetchClusterSuggestions();
         });
       } else {
-        futureBuilderKeyFaceThumbnails = UniqueKey();
-        setState(() {});
+        _prepareNextSuggestion();
       }
     } catch (e, s) {
       _logger.severe("Error saving as another person", e, s);
@@ -402,9 +400,59 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   }
 
   void _fetchClusterSuggestions() {
-    debugPrint("Fetching suggestions for ${widget.person.data.name}");
+    canGiveFeedback = false;
+    final loadID = ++_suggestionLoadID;
     futureClusterSuggestions = ClusterFeedbackService.instance
-        .getSuggestionForPerson(widget.person);
+        .getSuggestionForPerson(widget.person)
+        .then((suggestions) {
+          if (!mounted || loadID != _suggestionLoadID) {
+            return <ClusterSuggestion>[];
+          }
+          allSuggestions = suggestions;
+          return _prepareSuggestions(suggestions, 0, loadID);
+        });
+  }
+
+  Future<List<ClusterSuggestion>> _prepareSuggestions(
+    List<ClusterSuggestion> suggestions,
+    int index,
+    int loadID, {
+    bool forceFirst = false,
+  }) async {
+    if (suggestions.isEmpty) {
+      if (mounted && loadID == _suggestionLoadID) {
+        _thumbnailLoader.prefetch(const []);
+        canGiveFeedback = true;
+      }
+      return suggestions;
+    }
+    final candidates = suggestions.skip(index);
+    final prepared = await _thumbnailLoader.next(
+      forceFirst ? candidates.take(1) : candidates,
+    );
+    if (!mounted || loadID != _suggestionLoadID || prepared == null) return [];
+    final selectedIndex = suggestions.indexOf(prepared.suggestion, index);
+    final selected = suggestions.removeAt(selectedIndex);
+    suggestions.insert(index, selected);
+    _currentThumbnails = prepared.thumbnails;
+    canGiveFeedback = true;
+    _restoringSuggestion = false;
+    _thumbnailLoader.prefetch(suggestions.skip(index + 1));
+    return suggestions;
+  }
+
+  void _prepareNextSuggestion() {
+    canGiveFeedback = false;
+    final loadID = ++_suggestionLoadID;
+    setState(() {
+      futureBuilderKeySuggestions = UniqueKey();
+      futureClusterSuggestions = _prepareSuggestions(
+        allSuggestions,
+        currentSuggestionIndex,
+        loadID,
+        forceFirst: _restoringSuggestion,
+      );
+    });
   }
 
   Widget _buildSuggestionView(
@@ -413,7 +461,6 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     bool usingMean,
     List<EnteFile> files,
     int numberOfSuggestions,
-    Future<Map<int, Uint8List?>> generateFaceThumbnails,
   ) {
     final widgetToReturn = Column(
       key: ValueKey("cluster_id-$clusterID-files-${files.length}"),
@@ -428,63 +475,43 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
           style: getEnteTextTheme(context).largeMuted,
         ),
         const SizedBox(height: 24),
-        _buildThumbnailWidget(files, clusterID, generateFaceThumbnails),
+        _buildThumbnailWidget(files, clusterID),
         const SizedBox(height: 24.0),
       ],
     );
-    precomputeFaceCrops();
     return widgetToReturn;
   }
 
-  Widget _buildThumbnailWidget(
-    List<EnteFile> files,
-    String clusterID,
-    Future<Map<int, Uint8List?>> generateFaceThumbnails,
-  ) {
-    return FutureBuilder<Map<int, Uint8List?>>(
-      key: futureBuilderKeyFaceThumbnails,
-      future: generateFaceThumbnails,
-      builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          final faceThumbnails = snapshot.data!;
-          canGiveFeedback = true;
-          return Column(
-            children: <Widget>[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: _buildThumbnailWidgetsRow(
-                  files,
-                  clusterID,
-                  faceThumbnails,
-                ),
-              ),
-              if (files.length > 3) const SizedBox(height: 12),
-              if (files.length > 3)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: _buildThumbnailWidgetsRow(
-                    files,
-                    clusterID,
-                    faceThumbnails,
-                    start: 3,
-                  ),
-                ),
-            ],
-          );
-        } else if (snapshot.hasError) {
-          return Center(child: Text(context.strings.error));
-        } else {
-          canGiveFeedback = false;
-          return const Center(child: CircularProgressIndicator());
-        }
-      },
+  Widget _buildThumbnailWidget(List<EnteFile> files, String clusterID) {
+    return Column(
+      children: <Widget>[
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: _buildThumbnailWidgetsRow(
+            files,
+            clusterID,
+            _currentThumbnails,
+          ),
+        ),
+        if (files.length > 3) const SizedBox(height: 12),
+        if (files.length > 3)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: _buildThumbnailWidgetsRow(
+              files,
+              clusterID,
+              _currentThumbnails,
+              start: 3,
+            ),
+          ),
+      ],
     );
   }
 
   List<Widget> _buildThumbnailWidgetsRow(
     List<EnteFile> files,
     String cluserId,
-    Map<int, Uint8List?> faceThumbnails, {
+    ReviewThumbnails faceThumbnails, {
     int start = 0,
   }) {
     return List<Widget>.generate(
@@ -497,11 +524,12 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
           child: Stack(
             children: [
               FaceThumbnailSquircleClip(
-                child: FileFaceWidget(
-                  files[start + index],
-                  clusterID: cluserId,
-                  faceCrop:
-                      faceThumbnails[files[start + index].uploadedFileID!],
+                child: ReviewThumbnailWidget(
+                  faceThumbnails[files[start + index].uploadedFileID!]!,
+                  key: ValueKey((
+                    cluserId,
+                    files[start + index].uploadedFileID,
+                  )),
                 ),
               ),
               if (start + index == 5 && files.length > 6)
@@ -525,56 +553,11 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     );
   }
 
-  Future<Map<int, Uint8List?>> _generateFaceThumbnails(
-    List<EnteFile> files,
-    String clusterID,
-  ) async {
-    final futures = <Future<Uint8List?>>[];
-    for (final file in files) {
-      futures.add(
-        precomputeClusterFaceCrop(file, clusterID, useFullFile: true),
-      );
-    }
-    final faceCropsList = await Future.wait(futures);
-    final faceCrops = <int, Uint8List?>{};
-    for (var i = 0; i < faceCropsList.length; i++) {
-      faceCrops[files[i].uploadedFileID!] = faceCropsList[i];
-    }
-    return faceCrops;
-  }
-
-  void precomputeFaceCrops() {
-    const precomputeSuggestions = 6;
-    const maxPrecomputations = 8;
-    int compCount = 0;
-    if (allSuggestions.length > currentSuggestionIndex + 1) {
-      outerLoop:
-      for (final suggestion in allSuggestions.sublist(
-        currentSuggestionIndex + 1,
-        min(
-          allSuggestions.length,
-          currentSuggestionIndex + precomputeSuggestions,
-        ),
-      )) {
-        final files = suggestion.filesInCluster;
-        final clusterID = suggestion.clusterIDToMerge;
-        final preComputesLeft = maxPrecomputations - compCount;
-        final computeHere = min(files.length, min(preComputesLeft, 6));
-        unawaited(
-          _generateFaceThumbnails(files.sublist(0, computeHere), clusterID),
-        );
-        compCount += computeHere;
-        if (compCount >= maxPrecomputations) {
-          debugPrint('Prefetching $compCount face thumbnails for suggestions');
-          break outerLoop;
-        }
-      }
-    }
-  }
-
   Future<void> _undoLastFeedback() async {
-    if (pastUserFeedback.isNotEmpty) {
-      final SuggestionUserFeedback lastFeedback = pastUserFeedback.removeLast();
+    if (!canGiveFeedback || pastUserFeedback.isEmpty) return;
+    setState(() => canGiveFeedback = false);
+    final lastFeedback = pastUserFeedback.last;
+    try {
       if (isBodyReference(lastFeedback.suggestion.clusterIDToMerge)) {
         await ClusterFeedbackService.instance.undoSuggestion(
           widget.person,
@@ -591,16 +574,28 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
           lastFeedback.suggestion.clusterIDToMerge,
         );
       }
+      if (!mounted) return;
+      pastUserFeedback.removeLast();
       _notifySuggestionReviewed();
-
-      futureClusterSuggestions = futureClusterSuggestions.then((list) {
-        return list.sublist(currentSuggestionIndex)
-          ..insert(0, lastFeedback.suggestion);
-      });
+      final loadID = ++_suggestionLoadID;
+      final remaining = allSuggestions.sublist(currentSuggestionIndex)
+        ..insert(0, lastFeedback.suggestion);
+      allSuggestions = remaining;
       currentSuggestionIndex = 0;
+      _restoringSuggestion = true;
+      futureClusterSuggestions = _prepareSuggestions(
+        remaining,
+        0,
+        loadID,
+        forceFirst: true,
+      );
       futureBuilderKeySuggestions = UniqueKey();
-      futureBuilderKeyFaceThumbnails = UniqueKey();
       setState(() {});
+    } catch (error, stack) {
+      _logger.severe("Error undoing review feedback", error, stack);
+      if (!mounted) return;
+      setState(() => canGiveFeedback = true);
+      await showGenericErrorDialog(context: context, error: error);
     }
   }
 }
