@@ -59,7 +59,8 @@ jobs:
                   "$sdkmanager_path" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
             - name: Restore Dart packages
-              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              id: dart-cache
+              uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   key: photos-pub-${{ runner.os }}-${{ hashFiles('mobile/pubspec.lock') }}
                   restore-keys: photos-pub-${{ runner.os }}-
@@ -67,28 +68,34 @@ jobs:
                       ~/.pub-cache/hosted
                       ~/.pub-cache/git
 
-            - name: Cache Rust dependencies
-              uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+            - name: Restore Rust dependencies
+              id: cargo-cache
+              uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
-                  workspaces: rust
-                  shared-key: photos-apk-${{ env.APK_CHANNEL }}
-                  cache-targets: false
+                  key: photos-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust/Cargo.lock', 'rust/**/Cargo.toml') }}
+                  restore-keys: photos-cargo-v1-${{ runner.os }}-${{ runner.arch }}-
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
 
             - name: Identify Rust build cache
               id: rust-build-key
               shell: bash
               env:
-                  BUILD_INPUTS: ${{ hashFiles('rust/**/Cargo.toml', 'rust/Cargo.lock', 'mobile/pubspec.lock', 'mobile/cargokit/**', 'mobile/apps/photos/android/**/*.gradle*', 'mobile/gradle/**', '.github/workflows/fork-photos-apk.yml', '.github/actions/setup-flutter/action.yml') }}
+                  BUILD_INPUTS: ${{ hashFiles('rust/**/Cargo.toml', 'rust/Cargo.lock', 'mobile/pubspec.lock', 'mobile/cargokit/**', 'mobile/apps/photos/android/**/*.gradle*', 'mobile/gradle/**', '.github/actions/setup-flutter/action.yml') }}
               run: |
                   compiler="$(rustc -vV | sha256sum | cut -d ' ' -f 1)"
                   echo "prefix=photos-rust-v1-${APK_CHANNEL}-${ImageOS}-${ImageVersion}-${compiler}-${BUILD_INPUTS}" >> "$GITHUB_OUTPUT"
+                  echo "compat-prefix=photos-rust-v1-${APK_CHANNEL}-${ImageOS}-${ImageVersion}-${compiler}" >> "$GITHUB_OUTPUT"
 
             - name: Restore Rust build outputs
               id: rust-build-cache
               uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   key: ${{ steps.rust-build-key.outputs.prefix }}-${{ github.sha }}
-                  restore-keys: ${{ steps.rust-build-key.outputs.prefix }}-
+                  restore-keys: |
+                      ${{ steps.rust-build-key.outputs.prefix }}-
+                      ${{ steps.rust-build-key.outputs.compat-prefix }}-
                   path: |
                       rust/target
                       mobile/apps/photos/build/ente_photos_frb/build
@@ -102,6 +109,17 @@ jobs:
             - name: Resolve locked Photos dependencies
               working-directory: mobile/apps/photos
               run: flutter pub get --enforce-lockfile
+
+            # Save before later tests/build/release steps can fail; the cache
+            # action's implicit post-save only runs when the whole job succeeds.
+            - name: Save Dart packages
+              if: steps.dart-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  key: ${{ steps.dart-cache.outputs.cache-primary-key }}
+                  path: |
+                      ~/.pub-cache/hosted
+                      ~/.pub-cache/git
 
             - name: Generate Flutter bindings
               working-directory: rust
@@ -122,6 +140,15 @@ jobs:
               if: github.ref == 'refs/heads/feat/ml-lab'
               working-directory: rust
               run: cargo test --locked -p ente-photos-frb --lib mobile_downloads_include_bodies_and_deduplicate_the_pet_detector
+
+            - name: Save Rust dependencies
+              if: steps.cargo-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                  key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
 
             - name: Prepare persistent test signature and arm64 packaging
               run: |
