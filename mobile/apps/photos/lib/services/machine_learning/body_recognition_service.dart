@@ -200,8 +200,17 @@ class BodyRecognitionService {
     await store(MLDataDB.instance, file.uploadedFileID!, entity.bodyIndex!);
   }
 
-  Future<void> acceptGroup(PersonEntity person, String reference) async {
-    final members = await groupMembers(reference);
+  Future<void> acceptGroup(
+    PersonEntity person,
+    String reference, {
+    Map<int, BodyDetection>? suggestionSnapshot,
+  }) async {
+    final members = suggestionSnapshot != null && suggestionSnapshot.isNotEmpty
+        ? [
+            for (final entry in suggestionSnapshot.entries)
+              (entry.key, entry.value),
+          ]
+        : await groupMembers(reference);
     final files = await FilesDB.instance.getFileIDToFileFromIDs(
       members.map((m) => m.$1).toList(),
     );
@@ -244,8 +253,17 @@ class BodyRecognitionService {
     }, initialMetadata: checkedMetadata);
   }
 
-  Future<void> rejectGroup(String personID, String reference) async {
-    final members = await groupMembers(reference);
+  Future<void> rejectGroup(
+    String personID,
+    String reference, {
+    Map<int, BodyDetection>? suggestionSnapshot,
+  }) async {
+    final members = suggestionSnapshot != null && suggestionSnapshot.isNotEmpty
+        ? [
+            for (final entry in suggestionSnapshot.entries)
+              (entry.key, entry.value),
+          ]
+        : await groupMembers(reference);
     final files = await FilesDB.instance.getFileIDToFileFromIDs(
       members.map((m) => m.$1).toList(),
     );

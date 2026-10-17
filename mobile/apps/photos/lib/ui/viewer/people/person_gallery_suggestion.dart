@@ -290,6 +290,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
           ? ClusterFeedbackService.instance.addClusterToExistingPerson(
               person: relevantPerson,
               clusterID: currentSuggestion.clusterIDToMerge,
+              bodyDetectionsByFile: currentSuggestion.bodyDetectionsByFile,
             )
           : _captureNotPersonFeedback(currentSuggestion);
 
@@ -325,6 +326,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     await ClusterFeedbackService.instance.rejectSuggestion(
       personID: suggestion.person.remoteID,
       clusterID: suggestion.clusterIDToMerge,
+      bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
     );
     Bus.instance.fire(
       PeopleChangedEvent(
@@ -376,6 +378,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         await ClusterFeedbackService.instance.addClusterToExistingPerson(
           person: selected,
           clusterID: clusterID,
+          bodyDetectionsByFile: currentSuggestion.bodyDetectionsByFile,
         );
       }
       if (!mounted || loadID != _suggestionLoadID) return;

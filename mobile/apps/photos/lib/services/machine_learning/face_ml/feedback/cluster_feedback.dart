@@ -33,8 +33,8 @@ class ClusterSuggestion {
   final bool usedOnlyMeanForSuggestion;
   final List<EnteFile> filesInCluster;
   final List<String> faceIDsInCluster;
-  // Snapshot the suggested body boxes for rendering; writes still validate the
-  // current remote group before applying feedback.
+  // Keep the suggested body detections with the review for both rendering and
+  // applying feedback to the exact members the user saw.
   final Map<int, BodyDetection> bodyDetectionsByFile;
 
   ClusterSuggestion(
@@ -465,9 +465,14 @@ class ClusterFeedbackService<T> {
   Future<void> rejectSuggestion({
     required String personID,
     required String clusterID,
+    Map<int, BodyDetection>? bodyDetectionsByFile,
   }) async {
     if (isBodyReference(clusterID)) {
-      await BodyRecognitionService.instance.rejectGroup(personID, clusterID);
+      await BodyRecognitionService.instance.rejectGroup(
+        personID,
+        clusterID,
+        suggestionSnapshot: bodyDetectionsByFile,
+      );
       return;
     }
     final person = await PersonService.instance.getPerson(personID);
@@ -1404,12 +1409,18 @@ class ClusterFeedbackService<T> {
   Future<void> addClusterToExistingPerson({
     required PersonEntity person,
     required String clusterID,
+    Map<int, BodyDetection>? bodyDetectionsByFile,
   }) async {
     if (isBodyReference(clusterID)) {
-      await BodyRecognitionService.instance.acceptGroup(person, clusterID);
+      await BodyRecognitionService.instance.acceptGroup(
+        person,
+        clusterID,
+        suggestionSnapshot: bodyDetectionsByFile,
+      );
       Bus.instance.fire(
         PeopleChangedEvent(
           type: PeopleEventType.addedClusterToPerson,
+          person: person,
           source: clusterID,
         ),
       );
