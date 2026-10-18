@@ -20,6 +20,7 @@ import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/entity_service.dart";
 import "package:photos/services/machine_learning/body_person_reset_service.dart";
+import "package:photos/services/machine_learning/face_ml/person/auto_unnamed_deduplication.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/photos_contacts_service.dart";
 import "package:photos/settings/local_settings.dart";
@@ -485,6 +486,9 @@ class PersonService {
       isPinned: isPinned,
       hideFromMemories: hideFromMemories,
       isUnnamed: isUnnamed,
+      autoCreationFaceIDs: isUnnamed
+          ? (faceIds.toSet().toList()..sort())
+          : null,
       birthDate: birthdate,
       email: email,
       userID: userID,
@@ -519,11 +523,146 @@ class PersonService {
       }
       return null;
     }
+    final faceIDs = (await faceMLDataDB.getFaceIDsForCluster(
+      clusterID,
+    )).toSet();
+    if (faceIDs.isEmpty ||
+        persons.any(
+          (person) =>
+              person.data.assigned.any(
+                (cluster) => cluster.faces.any(faceIDs.contains),
+              ) ||
+              person.data.rejectedFaceIDs.any(faceIDs.contains),
+        )) {
+      return null;
+    }
     final mappings = await faceMLDataDB.getPersonToClusterIdToFaceIds();
     if (mappings.values.any((clusters) => clusters.containsKey(clusterID))) {
       return null;
     }
     return addPerson(name: "", clusterID: clusterID, isUnnamed: true);
+  }
+
+  /// Claim a pristine automatic person before writing feedback outside its
+  /// entity (body review). A concurrent retirement conflicts rather than
+  /// leaving body feedback attached to an invisible person.
+  Future<void> protectAutomaticPerson(String personID) async {
+    final entity = await entityService.getEntity(EntityType.cgroup, personID);
+    if (entity == null) {
+      throw StateError("Person is unavailable; reload review");
+    }
+    final data = PersonData.fromJson(jsonDecode(entity.data));
+    if (data.autoDuplicateOf != null) {
+      throw StateError("Person changed; reload review");
+    }
+    if (data.autoCreationFaceIDs == null) return;
+    await entityService.addOrUpdate(
+      EntityType.cgroup,
+      data.copyWith(autoCreationFaceIDs: null).toJson(),
+      id: personID,
+      expectedUpdatedAt: entity.updatedAt,
+    );
+    _invalidatePersonCache();
+  }
+
+  /// Retire only identical, untouched automatic creations using the existing
+  /// entity version precondition. No unconditional delete or similarity merge.
+  /// Called after remote cgroup sync, before applying face-to-person mappings.
+  Future<bool> reconcileAutoUnnamedDuplicates() async {
+    // Most syncs have no duplicates. Reuse the person cache instead of reading
+    // all entities or scanning body metadata on every empty remote diff.
+    if (AutoUnnamedDeduplication.duplicateToCanonical(
+      await getPersons(),
+    ).isEmpty) {
+      return false;
+    }
+    final entities = await entityService.getEntities(EntityType.cgroup);
+    final persons = entities
+        .map((e) => PersonEntity(e.id, PersonData.fromJson(jsonDecode(e.data))))
+        .toList();
+    if (AutoUnnamedDeduplication.duplicateToCanonical(persons).isEmpty) {
+      return false;
+    }
+
+    // Body feedback lives separately from the person entity. Protect every
+    // referenced person, including rejected feedback; malformed data fails shut.
+    final bodyPersons = <String>{};
+    try {
+      for (final encoded in (await faceMLDataDB.bodyIndexes()).values) {
+        final raw = jsonDecode(encoded) as Map<String, dynamic>;
+        for (final detection in raw["detections"] as List) {
+          final decisions = (detection as Map)["decisions"];
+          if (decisions != null) {
+            bodyPersons.addAll((decisions as Map).keys.cast<String>());
+          }
+        }
+      }
+    } catch (e, s) {
+      logger.warning(
+        "Skipping automatic person cleanup: unreadable body data",
+        e,
+        s,
+      );
+      return false;
+    }
+    final protectedPersons = persons
+        .map(
+          (p) => bodyPersons.contains(p.remoteID)
+              ? p.copyWith(data: p.data.copyWith(autoCreationFaceIDs: null))
+              : p,
+        )
+        .toList();
+    final duplicates = AutoUnnamedDeduplication.duplicateToCanonical(
+      protectedPersons,
+    );
+    var changed = false;
+    for (final duplicateID in duplicates.keys) {
+      final snapshot = entities.firstWhere((e) => e.id == duplicateID);
+      final canonicalID = duplicates[duplicateID]!;
+      // Recheck local state after each awaited write. Remote edits to the loser
+      // are rejected atomically by expectedUpdatedAt on the server.
+      final current = await entityService.getEntities(EntityType.cgroup);
+      final currentPersons = current
+          .map(
+            (e) => PersonEntity(e.id, PersonData.fromJson(jsonDecode(e.data))),
+          )
+          .toList();
+      if (AutoUnnamedDeduplication.duplicateToCanonical(
+            currentPersons,
+          )[duplicateID] !=
+          canonicalID) {
+        continue;
+      }
+      final data = PersonData.fromJson(jsonDecode(snapshot.data));
+      final retired = data.copyWith(
+        assigned: [],
+        isUnnamed: false,
+        isHidden: true,
+        autoCreationFaceIDs: null,
+        autoDuplicateOf: canonicalID,
+      );
+      try {
+        await entityService.addOrUpdate(
+          EntityType.cgroup,
+          retired.toJson(),
+          id: duplicateID,
+          expectedUpdatedAt: snapshot.updatedAt,
+        );
+        _invalidatePersonCache();
+        changed = true;
+      } catch (e, s) {
+        // Retry only after the next ordinary sync has fetched fresh feedback.
+        logger.warning(
+          "Automatic person cleanup deferred for $duplicateID",
+          e,
+          s,
+        );
+      }
+    }
+    if (changed) {
+      await refreshPersonCache();
+    }
+    return changed;
   }
 
   Future<void> removeClusterToPerson({
@@ -636,7 +775,14 @@ class PersonService {
     final downloadedSyncTime = lastRemoteSyncTime();
     final appliedSyncTime = prefs.getInt(_appliedCGroupSyncTimeKey) ?? 0;
     final hasUnappliedChanges = downloadedSyncTime != appliedSyncTime;
-    if (!changed && !hasUnappliedChanges && skipClusterUpdateIfNoChange) {
+    // Retry deferred cleanup even if the cgroup diff is empty (e.g. a
+    // previous network failure or an interrupted local application).
+    final deduplicated =
+        changedEntities >= 0 && await reconcileAutoUnnamedDuplicates();
+    if (!changed &&
+        !hasUnappliedChanges &&
+        !deduplicated &&
+        skipClusterUpdateIfNoChange) {
       return false;
     }
 
@@ -666,6 +812,15 @@ class PersonService {
     bool shouldCheckRejectedFaces = false;
     for (var e in entities) {
       final personData = PersonData.fromJson(json.decode(e.data));
+      if (personData.autoDuplicateOf != null &&
+          personData.isHidden &&
+          personData.assigned.isEmpty &&
+          personData.manuallyAssigned.isEmpty) {
+        // bulkAssign only inserts: explicitly remove stale mappings on every
+        // device that receives a retired duplicate before applying the winner.
+        await faceMLDataDB.removePerson(e.id);
+        await faceMLDataDB.removeFaceIdCachedForPersonOrCluster(e.id);
+      }
       if (personData.rejectedFaceIDs.isNotEmpty) {
         shouldCheckRejectedFaces = true;
       }
@@ -759,7 +914,7 @@ class PersonService {
     }
 
     await prefs.setInt(_appliedCGroupSyncTimeKey, downloadedSyncTime);
-    return changed || hasUnappliedChanges;
+    return changed || hasUnappliedChanges || deduplicated;
   }
 
   Future<PersonAvatarUpdateResult> updateAvatar(
@@ -1020,7 +1175,13 @@ class PersonService {
     Map<String, dynamic> jsonMap, {
     String? id,
   }) async {
-    final result = await entityService.addOrUpdate(type, jsonMap, id: id);
+    // Even an edit later reverted by the user must opt out permanently.
+    final payload = Map<String, dynamic>.from(jsonMap);
+    if (id != null) {
+      payload.remove("autoCreationFaceIDs");
+      payload.remove("autoDuplicateOf");
+    }
+    final result = await entityService.addOrUpdate(type, payload, id: id);
     _invalidatePersonCache();
     return result;
   }

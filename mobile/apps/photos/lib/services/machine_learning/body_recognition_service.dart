@@ -218,6 +218,7 @@ class BodyRecognitionService {
     String reference, {
     Map<int, BodyDetection>? suggestionSnapshot,
   }) async {
+    await PersonService.instance.protectAutomaticPerson(person.remoteID);
     final members = suggestionSnapshot != null && suggestionSnapshot.isNotEmpty
         ? [
             for (final entry in suggestionSnapshot.entries)
@@ -271,6 +272,7 @@ class BodyRecognitionService {
     String reference, {
     Map<int, BodyDetection>? suggestionSnapshot,
   }) async {
+    await PersonService.instance.protectAutomaticPerson(personID);
     final members = suggestionSnapshot != null && suggestionSnapshot.isNotEmpty
         ? [
             for (final entry in suggestionSnapshot.entries)
@@ -342,6 +344,7 @@ class BodyRecognitionService {
   }
 
   Future<void> undoGroup(PersonEntity person, String reference) async {
+    await PersonService.instance.protectAutomaticPerson(person.remoteID);
     final members = await groupMembers(reference);
     final introduced = <int>{};
     for (final member in members) {
@@ -409,6 +412,16 @@ class BodyRecognitionService {
           ),
         );
       }
+    }
+    final affectedPersonIDs = <String>{
+      ?suggestedPerson,
+      for (final member in members.where((m) => selected.contains(m.$1)))
+        for (final decision in member.$2.decisions.entries)
+          if (decision.value is Map && decision.value["status"] == "accepted")
+            decision.key,
+    };
+    for (final personID in affectedPersonIDs) {
+      await PersonService.instance.protectAutomaticPerson(personID);
     }
     final selectedID = "body-group:${newClusterID()}";
     final result = <String, List<EnteFile>>{};
@@ -478,6 +491,7 @@ class BodyRecognitionService {
     String personID,
     Map<String, dynamic>? decision,
   ) async {
+    await PersonService.instance.protectAutomaticPerson(personID);
     final entity = await fileDataService.updateFileData(file, (latest) {
       final index = latest.bodyIndex;
       if (index == null) throw StateError("Body index is unavailable");

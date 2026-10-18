@@ -39,6 +39,13 @@ class PersonData {
   // retain their ignored semantics.
   final bool isUnnamed;
 
+  // Immutable creation snapshot for conservative cross-device deduplication.
+  // Any subsequent person update removes this provenance.
+  final List<String>? autoCreationFaceIDs;
+
+  // Retired duplicate; retained as a versioned entity rather than deleted.
+  final String? autoDuplicateOf;
+
   String? avatarFaceID;
   List<ClusterInfo> assigned = List<ClusterInfo>.empty();
   List<String> rejectedFaceIDs = List<String>.empty();
@@ -69,6 +76,8 @@ class PersonData {
     this.isPinned = false,
     this.hideFromMemories = false,
     this.isUnnamed = false,
+    this.autoCreationFaceIDs,
+    this.autoDuplicateOf,
     this.birthDate,
     this.email,
     this.userID,
@@ -81,6 +90,8 @@ class PersonData {
     bool? isPinned,
     bool? hideFromMemories,
     bool? isUnnamed,
+    Object? autoCreationFaceIDs = _personDataUnchanged,
+    Object? autoDuplicateOf = _personDataUnchanged,
     Object? birthDate = _personDataUnchanged,
     Object? email = _personDataUnchanged,
     Object? userID = _personDataUnchanged,
@@ -97,6 +108,12 @@ class PersonData {
       isUnnamed: (name?.isNotEmpty ?? false)
           ? false
           : isUnnamed ?? this.isUnnamed,
+      autoCreationFaceIDs: identical(autoCreationFaceIDs, _personDataUnchanged)
+          ? this.autoCreationFaceIDs
+          : autoCreationFaceIDs as List<String>?,
+      autoDuplicateOf: identical(autoDuplicateOf, _personDataUnchanged)
+          ? this.autoDuplicateOf
+          : autoDuplicateOf as String?,
       birthDate: identical(birthDate, _personDataUnchanged)
           ? this.birthDate
           : birthDate as String?,
@@ -139,6 +156,8 @@ class PersonData {
     'isPinned': isPinned,
     'hideFromMemories': hideFromMemories,
     'isUnnamed': isUnnamed,
+    if (autoCreationFaceIDs != null) 'autoCreationFaceIDs': autoCreationFaceIDs,
+    if (autoDuplicateOf != null) 'autoDuplicateOf': autoDuplicateOf,
     'birthDate': birthDate,
     'email': email,
     'userID': userID,
@@ -182,6 +201,12 @@ class PersonData {
       isUnnamed:
           (json['name'] as String? ?? '').isEmpty &&
           (json['isUnnamed'] as bool? ?? false),
+      autoCreationFaceIDs:
+          json['autoCreationFaceIDs'] is List &&
+              (json['autoCreationFaceIDs'] as List).every((id) => id is String)
+          ? List<String>.unmodifiable(json['autoCreationFaceIDs'] as List)
+          : null,
+      autoDuplicateOf: json['autoDuplicateOf'] as String?,
       birthDate: json['birthDate'] as String?,
       userID: json['userID'] as int?,
       email: json['email'] as String?,
