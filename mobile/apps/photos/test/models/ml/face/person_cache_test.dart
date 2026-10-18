@@ -112,6 +112,24 @@ void main() {
     expect(entities.addCount, 1);
   });
 
+  test(
+    "deleted unnamed person can be recreated with a fresh entity ID",
+    () async {
+      db.faceIDsByCluster["cluster"] = {"1_face"};
+
+      final first = await service.addUnnamedPersonForClusterIfAbsent("cluster");
+      await service.deletePerson(first!.remoteID);
+      final recreated = await service.addUnnamedPersonForClusterIfAbsent(
+        "cluster",
+      );
+
+      expect(recreated, isNotNull);
+      expect(recreated!.remoteID, isNot(first.remoteID));
+      expect(entities.addCount, 2);
+      expect(entities.addWithCustomIDCalls, [false, false]);
+    },
+  );
+
   test("named cluster assignment blocks unnamed creation", () async {
     entities.seed(
       PersonData(
@@ -187,10 +205,12 @@ class _EntityService implements EntityService {
   LocalEntityData? entity;
   bool failDelete = false;
   int addCount = 0;
+  int _nextGeneratedID = 0;
+  final addWithCustomIDCalls = <bool>[];
 
-  void seed(PersonData data) {
+  void seed(PersonData data, {String id = "person"}) {
     entity = LocalEntityData(
-      id: "person",
+      id: id,
       type: EntityType.cgroup,
       data: jsonEncode(data.toJson()),
       ownerID: 1,
@@ -223,7 +243,11 @@ class _EntityService implements EntityService {
     int? expectedUpdatedAt,
   }) async {
     addCount++;
-    seed(PersonData.fromJson(jsonMap));
+    addWithCustomIDCalls.add(addWithCustomID);
+    seed(
+      PersonData.fromJson(jsonMap),
+      id: id ?? "generated-${_nextGeneratedID++}",
+    );
     return entity!;
   }
 
@@ -256,6 +280,7 @@ class _MLDataDB implements IMLDataDB<int> {
   @override
   Future<void> removePerson(String personID) async {
     removedPersons.add(personID);
+    personToClusterIDs.remove(personID);
   }
 
   @override

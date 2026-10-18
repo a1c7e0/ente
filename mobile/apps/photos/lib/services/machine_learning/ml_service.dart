@@ -1090,8 +1090,9 @@ class MLService {
   Future<void> _createEligibleUnnamedPersonsSafely({
     required MlRunControl control,
   }) async {
-    if (control.stopRequested) return;
-    if (isLocalGalleryMode) return;
+    if (control.stopRequested || !hasGrantedMLConsent || isLocalGalleryMode) {
+      return;
+    }
     final threshold = localSettings.autoUnnamedPersonPhotoThreshold;
     if (threshold <= 0) return;
     final ownerID = Configuration.instance.getUserID();
@@ -1127,7 +1128,9 @@ class MLService {
     var created = 0;
     for (final clusterID in candidates) {
       if (control.stopRequested ||
+          !hasGrantedMLConsent ||
           isLocalGalleryMode ||
+          localSettings.autoUnnamedPersonPhotoThreshold != threshold ||
           Configuration.instance.getUserID() != ownerID) {
         break;
       }
@@ -1151,7 +1154,9 @@ class MLService {
         continue;
       }
       if (control.stopRequested ||
+          !hasGrantedMLConsent ||
           isLocalGalleryMode ||
+          localSettings.autoUnnamedPersonPhotoThreshold != threshold ||
           Configuration.instance.getUserID() != ownerID) {
         break;
       }

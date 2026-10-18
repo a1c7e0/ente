@@ -49,4 +49,6 @@ The diagnostic APK uses a separate application ID and local database; it cannot 
 
 On mobile, the ML debug page's **Auto-create unnamed people** threshold defaults to 10 distinct uploaded owner photos; set it to 0 to disable. After a normal ML run or manual clustering command, the app considers only existing unassigned clusters and creates at most 10 unnamed people in that pass. Creation uses encrypted cgroup sync and excludes face IDs already assigned in synced person feedback. These unnamed people can be reviewed and renamed through the existing People flows. Two devices that create the same cluster at the same time can rarely create duplicate people because cgroup creation has no idempotency key. The setting does not alter face clustering or auto-merge thresholds and does not trigger historical image reindexing.
 
+The experiment lives on `feat/auto-unnamed-person`, with focused verification on relevant pushes. It uses an optional `isUnnamed` person metadata field; clients without support for this field treat empty-name people as ignored. Legacy ignored people remain ignored. APK builds remain manual.
+
 For ML Lab diagnostics and reset behavior, including reset scope and confirmation text, see [ML Lab](ml-lab.md). For detector evaluation details, see [mobile ML diagnostics](ml-diagnostics.md).
