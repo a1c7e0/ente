@@ -1,18 +1,26 @@
 # ML Lab
 
-ML Lab is the fork's development surface for inspecting and resetting body ML data. Its Android APK is a separate app with its own local database. It can coexist with the regular Photos app, but it cannot read that app's local-only indexes. Account-backed encrypted metadata syncs through the usual account flow.
+The regular Photos app in the current integration source has selected-photo ML debug and reset controls. The separate Ente ML Lab APK retains additional library-wide body reset and diagnostic tools. These apps have separate local databases: Lab can coexist with Photos, but cannot read Photos' local-only indexes. Account-backed encrypted metadata syncs through the usual account flow. Source availability does not mean a build has been released; see [fork testing](fork-testing.md) for branch-specific APK builds.
+
+## Selected-photo tools in Photos
+
+With ML consent enabled, open **Settings → Machine Learning** and tap the page title seven times. On **ML Debug**, turn on **Show ML debug options**. In a gallery selection action sheet, **ML reset** clears person associations and body review decisions for the selected photos while retaining detections, embeddings, and face clusters. A face assignment belongs to its cluster, so selecting a photo unassigns that whole touched cluster. **ML full reset** removes face, body, and CLIP data and their person/group associations from selected photos, then offers **Re-calculate now** or **Re-calculate later**. Recalculation uses normal ML indexing for the selected files; deferred resets are picked up by normal processing later. The original photos and other metadata remain unchanged.
+
+These selection actions are shown only when every selected item is owned by the signed-in user and has an uploaded file ID. Metadata reads are batched by up to 200 photos and writes run at up to four concurrent updates. A file whose metadata fetch or update fails is left out of the local binding/index cleanup and remains in the selection for retry. Reset completion does not wait for a full-library metadata fetch or person reconciliation; normal sync paths handle later account updates. A touched person is deleted only when it has no remaining face clusters, manual photo assignments, or accepted body links. Resetting bindings does not bypass face quality or review checks for future suggestions.
+
+For one owned, uploaded photo, the viewer menu offers **Re-calculate ML Data**. Photo details also exposes **ML detections**, where stored face and body boxes can be inspected and toggled independently; **Run once (no save)** trials inference on that photo without storing or syncing its detections.
 
 ## Inspect a photo
 
-Build and install the ML Lab APK from the `feat/ml-lab` branch (see [fork testing](fork-testing.md)). Open a photo, open its details, then choose **ML detections (test build)**. The page shows stored face and body indexes for the active mode and distinguishes an absent index from an indexed photo with no detections. Face boxes are green and body boxes orange; `*` marks a body linked to a face. Scores are detector confidence values, not identity-match probabilities. Face and body boxes can be toggled independently, and the image and boxes zoom together.
+Build and install the ML Lab APK from the `feat/ml-lab` branch (see [fork testing](fork-testing.md)). Open a photo, open its details, then choose **ML detections (test build)**. The Lab page shows stored face and body indexes for the active mode and distinguishes an absent index from an indexed photo with no detections. Face boxes are green and body boxes orange; `*` marks a body linked to a face. Scores are detector confidence values, not identity-match probabilities. Face and body boxes can be toggled independently, and the image and boxes zoom together.
 
 **Run once (no save)** runs the current face and body pipelines for that photo without storing or uploading results and without grouping or review. It requires ML consent and local indexing, follows the existing ML lock and WebGPU policy, and may download the original photo and model assets. A busy lock is reported so the run can be retried. Trial red boxes show raw body detections excluded by the existing face-association rule. The diagnostic uses the same association function as normal indexing.
 
-The diagnostic entry requires `--dart-define=enteMLDiagnostics=true`; it does not add boxes to the regular viewer. In the ML settings page, the existing developer options are available by tapping the enabled ML settings title seven times. Model downloads include Body Detection Model and Body Embedding Model, using the existing preload, progress, and retry flow. The shared body detector used for pet recognition downloads once.
+The Lab diagnostic entry requires `--dart-define=enteMLDiagnostics=true`; it does not add boxes to the regular viewer. Model downloads include Body Detection Model and Body Embedding Model, using the existing preload, progress, and retry flow. The shared body detector used for pet recognition downloads once.
 
-## Reset body data
+## Library-wide body resets in ML Lab
 
-The developer options provide two resets. **Reset body review and grouping** clears review decisions, manual group splits, and rejected matches while retaining detections and embeddings. **Reset body indexes and re-run** clears detections and embeddings, then reruns body indexing; face and CLIP data and original photos remain.
+The Lab developer options provide two library-wide body resets. **Reset body review and grouping** clears review decisions, manual group splits, and rejected matches while retaining detections and embeddings. **Reset body indexes and re-run** clears detections and embeddings, then reruns body indexing; face and CLIP data and original photos remain.
 
 Before either operation, the app gathers body indexes that match uploaded files owned by the signed-in account across the indexed library, including hidden files. The confirmation count is that target set. The operation is library-wide; it does not use the selected album as its scope. A process-wide ML lock protects the batch reset, progress is shown, and per-file failures are reported so the operation can be retried. The re-index reset forces indexing after the clear succeeds.
 

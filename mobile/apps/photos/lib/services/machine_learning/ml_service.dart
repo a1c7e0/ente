@@ -16,8 +16,8 @@ import "package:photos/events/app_mode_changed_event.dart";
 import "package:photos/events/compute_control_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/main.dart";
-import "package:photos/models/file/file.dart";
 import "package:photos/models/file/extensions/file_props.dart";
+import "package:photos/models/file/file.dart";
 import "package:photos/models/file/file_type.dart";
 import "package:photos/models/ml/clip.dart";
 import "package:photos/models/ml/face/face.dart";
@@ -336,8 +336,9 @@ class MLService {
     return canFetch;
   }
 
-  Future<void> _sync() async {
-    await fileDataService.syncFDStatus();
+  Future<void> _sync({required MlRunControl control}) async {
+    await fileDataService.syncFDStatus(mlLockHeld: true, control: control);
+    if (control.stopRequested) return;
     await PersonService.instance.sync();
   }
 
@@ -455,7 +456,7 @@ class MLService {
       if (remoteSyncOnly && mode == MLMode.localGallery) {
         return MlRunDisposition.completed;
       }
-      await _sync();
+      await _sync(control: control);
       if (control.stopRequested) {
         _logRunStopped(control, "after sync");
         return MlRunDisposition.stopped;
@@ -597,6 +598,7 @@ class MLService {
     for (final control in _runControls.toList(growable: false)) {
       control.requestStop(reason);
     }
+    fileDataService.stopMetadataSync(reason);
   }
 
   Future<MlLockAttempt> fetchAndIndexAllImages({required MLMode mode}) async {
@@ -640,7 +642,7 @@ class MLService {
       control,
       () async {
         if (!hasGrantedMLConsent || control.stopRequested) return;
-        await _sync();
+        await _sync(control: control);
         if (control.stopRequested) return;
 
         await MLModelDownloadService.instance.ensureModelsDownloaded(
@@ -661,9 +663,11 @@ class MLService {
         await MLIndexingIsolate.instance.prepareRustRuntime();
         try {
           final selectedFiles = byID.values.toList();
-          for (var start = 0;
-              start < selectedFiles.length;
-              start += fileDownloadMlLimit) {
+          for (
+            var start = 0;
+            start < selectedFiles.length;
+            start += fileDownloadMlLimit
+          ) {
             if (control.stopRequested) {
               allProcessed = false;
               break;
