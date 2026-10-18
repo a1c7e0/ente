@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::helpers::{bind_placeholders, group_into, optional_parameter, pair};
 use crate::db::{self, Row, params_from_iter};
 
-use super::faces::{file_id_from_face_id, is_bad_face_for_clustering};
+use super::faces::{MINIMUM_QUALITY_FACE_SCORE, file_id_from_face_id, is_bad_face_for_clustering};
 use super::unique_in_order;
 use crate::ml_db::schema::{
     CREATE_CLUSTER_CENTROID_VECTOR_ID_MAPPING_TABLE, CREATE_CLUSTER_PERSON_TABLE,
@@ -61,7 +61,10 @@ impl MlDb {
         )
     }
 
-    pub fn get_bad_face_singleton_cluster_ids(&self) -> Result<HashSet<String>> {
+    pub fn get_bad_face_singleton_cluster_ids(
+        &self,
+        include_sideways: bool,
+    ) -> Result<HashSet<String>> {
         let rows: Vec<(String, f64, f64, i64)> = self.read_all(
             r#"
             SELECT fc.cluster_id, f.score, f.blur, f.is_sideways
@@ -77,7 +80,9 @@ impl MlDb {
         Ok(rows
             .into_iter()
             .filter(|(_, score, blur, is_sideways)| {
-                is_bad_face_for_clustering(*score, *blur, *is_sideways == 1)
+                is_bad_face_for_clustering(*score, *blur, include_sideways && *is_sideways == 1)
+                    // Match the strict indexing gate for re-admitted reviews.
+                    || (!include_sideways && *score <= MINIMUM_QUALITY_FACE_SCORE)
             })
             .map(|(cluster_id, _, _, _)| cluster_id)
             .collect())
@@ -425,7 +430,7 @@ fn read_cluster_centroid(row: &Row<'_>) -> db::Result<ClusterCentroidRow> {
 
 #[cfg(test)]
 pub(in crate::ml_db) mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::path::Path;
 
     use super::{ClusterCentroidRow, ClusterSummary, MlDb};
@@ -506,11 +511,65 @@ pub(in crate::ml_db) mod tests {
         check(
             &db,
             &cases![
-                "bad singletons": set(["c7", "c8", "c9"]) => |db| db.get_bad_face_singleton_cluster_ids(),
+                "bad singletons": set(["c7", "c8", "c9"]) => |db| db.get_bad_face_singleton_cluster_ids(true),
+                "bad singleton quality": set(["c8", "c9"]) => |db| db.get_bad_face_singleton_cluster_ids(false),
                 "memory lane": set(["c2", "c3", "c7", "c8", "c9"]) =>
                     |db| db.get_clusters_for_memory_lane(&set(["c1"])),
             ],
         );
+    }
+
+    #[test]
+    fn profile_review_keeps_quality_and_singleton_guards() {
+        let (_directory, db) = open();
+        let fixtures = [
+            ("clear-profile", 0.9, 300.0),
+            ("blurred-profile", 0.9, 49.0),
+            ("weak-profile", 0.82, 199.0),
+            ("score-boundary", 0.8, 300.0),
+            ("multi-profile", 0.9, 300.0),
+            ("multi-profile", 0.9, 300.0),
+        ];
+        for (index, (cluster, score, blur)) in fixtures.into_iter().enumerate() {
+            let face_id = format!("{index}_0");
+            db.bulk_insert_faces(&[faces::FaceRow {
+                file_id: index as i64,
+                face_id: face_id.clone(),
+                detection_json: "{}".into(),
+                embedding: vec![1.0, 0.0, 0.0],
+                score,
+                blur,
+                is_sideways: true,
+                image_height: 100,
+                image_width: 100,
+                ml_version: 1,
+            }])
+            .unwrap();
+            db.update_face_id_to_cluster_id(&HashMap::from([(face_id, cluster.to_owned())]))
+                .unwrap();
+        }
+        let bad = db.get_bad_face_singleton_cluster_ids(true).unwrap();
+        let quality_bad = db.get_bad_face_singleton_cluster_ids(false).unwrap();
+        assert_eq!(
+            bad,
+            set([
+                "clear-profile",
+                "blurred-profile",
+                "weak-profile",
+                "score-boundary",
+            ]),
+        );
+        assert_eq!(
+            quality_bad,
+            set(["blurred-profile", "weak-profile", "score-boundary"]),
+        );
+        assert_eq!(
+            bad.difference(&quality_bad)
+                .cloned()
+                .collect::<HashSet<_>>(),
+            set(["clear-profile"]),
+        );
+        assert!(!bad.contains("multi-profile"));
     }
 
     #[test]

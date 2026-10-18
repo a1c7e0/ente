@@ -22,9 +22,16 @@ import "package:photos/service_locator.dart";
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_clustering_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_filtering/face_filtering_constants.dart";
+import "package:photos/services/machine_learning/face_ml/feedback/profile_review.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/search_service.dart";
+
+typedef _SingletonExclusions = ({
+  Set<String> bad,
+  Set<String> qualityBad,
+  Set<String> rejected,
+});
 
 class ClusterSuggestion {
   final PersonEntity person;
@@ -75,12 +82,83 @@ class ClusterFeedbackService<T> {
     lastViewedClusterID = '';
   }
 
-  Future<Set<String>> _getExcludedSuggestionClusterIDs() async {
+  Future<_SingletonExclusions> _getSingletonExclusions() async {
+    final qualityBadFuture = mlDataDB
+        .getBadFaceSingletonClusterIDs(includeSideways: false)
+        .then<Set<String>?>((value) => value)
+        .onError((Object e, StackTrace s) {
+          _logger.warning("Could not check profile review quality", e, s);
+          return null;
+        });
     final results = await Future.wait([
       mlDataDB.getBadFaceSingletonClusterIDs(),
       mlDataDB.getClustersWithThreeOrMoreNotPersonFeedback(),
     ]);
-    return results[0].union(results[1]);
+    return (
+      bad: results[0],
+      qualityBad: await qualityBadFuture ?? results[0],
+      rejected: results[1],
+    );
+  }
+
+  Future<({Set<String> excluded, Map<String, String> profilePersonIDs})>
+  _getFaceSuggestionFilters({
+    required Set<String> targetPersonIDs,
+    required Map<String, int> clusterCounts,
+    Map<String, Set<String>>? personToClusterIDs,
+    _SingletonExclusions? singletonExclusions,
+  }) async {
+    final quality = singletonExclusions ?? await _getSingletonExclusions();
+    final excluded = quality.bad.union(quality.rejected);
+    final profiles = quality.bad
+        .difference(quality.qualityBad)
+        .difference(quality.rejected);
+    if (profiles.isEmpty) {
+      return (excluded: excluded, profilePersonIDs: <String, String>{});
+    }
+
+    try {
+      final personClusters =
+          personToClusterIDs ?? await mlDataDB.getPersonToClusterIDs();
+      final activePersonClusters = <String, Set<String>>{
+        for (final entry in personClusters.entries)
+          entry.key: entry.value.where(clusterCounts.containsKey).toSet(),
+      };
+      final needed = <String>{
+        ...profiles,
+        for (final clusters in activePersonClusters.values) ...clusters,
+      }.toList();
+      // Read only cached centroids, in bounded SQL batches. Do not load face
+      // embeddings or rebuild indexes just to admit an additional review.
+      final summaries = <String, (Uint8List, int)>{};
+      const batchSize = 500;
+      for (var start = 0; start < needed.length; start += batchSize) {
+        summaries.addAll(
+          await mlDataDB.getClusterToClusterSummary(
+            needed.sublist(start, min(start + batchSize, needed.length)),
+          ),
+        );
+      }
+      final matches =
+          await _computer.compute(
+                profileReviewMatches,
+                param: {
+                  "profileClusterIDs": profiles,
+                  "targetPersonIDs": targetPersonIDs,
+                  "personToClusterIDs": activePersonClusters,
+                  "clusterCounts": clusterCounts,
+                  "summaries": summaries,
+                },
+              )
+              as Map<String, String>;
+      return (
+        excluded: excluded.difference(matches.keys.toSet()),
+        profilePersonIDs: matches,
+      );
+    } catch (e, s) {
+      _logger.warning("Could not verify profile review candidates", e, s);
+      return (excluded: excluded, profilePersonIDs: <String, String>{});
+    }
   }
 
   Future<List<ClusterSuggestion>> getSuggestionForPerson(
@@ -552,23 +630,24 @@ class ClusterFeedbackService<T> {
       final personToClusterIDsFuture = mlDataDB.getPersonToClusterIDs();
       final personToRejectedSuggestionsFuture = mlDataDB
           .getPersonToRejectedSuggestions();
-      final excludedSuggestionClusterIDsFuture =
-          _getExcludedSuggestionClusterIDs();
+      final singletonExclusionsFuture = _getSingletonExclusions();
       final canUseVectorDbFuture =
           _canUseClusterCentroidVectorDbForSuggestions();
       await Future.wait<Object?>([
         allClusterIdsToCountMapFuture,
         personToClusterIDsFuture,
         personToRejectedSuggestionsFuture,
-        excludedSuggestionClusterIDsFuture,
+        singletonExclusionsFuture,
         canUseVectorDbFuture,
       ], eagerError: false);
       final allClusterIdsToCountMap = await allClusterIdsToCountMapFuture;
       final personToClusterIDs = await personToClusterIDsFuture;
       final personToRejectedSuggestions =
           await personToRejectedSuggestionsFuture;
-      final excludedSuggestionClusterIDs =
-          await excludedSuggestionClusterIDsFuture;
+      final singletonExclusions = await singletonExclusionsFuture;
+      var excludedSuggestionClusterIDs = singletonExclusions.bad.union(
+        singletonExclusions.rejected,
+      );
       final canUseVectorDb = await canUseVectorDbFuture;
       if (!canUseVectorDb) {
         _logger.info(
@@ -591,6 +670,13 @@ class ClusterFeedbackService<T> {
       if (selectedPersonIDs.isEmpty) {
         return [];
       }
+      final filters = await _getFaceSuggestionFilters(
+        targetPersonIDs: selectedPersonIDs,
+        clusterCounts: allClusterIdsToCountMap,
+        personToClusterIDs: personToClusterIDs,
+        singletonExclusions: singletonExclusions,
+      );
+      excludedSuggestionClusterIDs = filters.excluded;
 
       final personIdToClusters = <String, Set<String>>{};
       final selectedPersonClusters = <String>{};
@@ -691,7 +777,7 @@ class ClusterFeedbackService<T> {
       }
 
       final selectedClusterToFaceIDs = await mlDataDB.getClusterToFaceIDs(
-        selectedPersonClusters,
+        selectedPersonClusters.union(filters.profilePersonIDs.keys.toSet()),
       );
       final personIDToFileIDs = <String, Set<int>>{};
       for (final entry in personIDToQueryClusters.entries) {
@@ -706,13 +792,26 @@ class ClusterFeedbackService<T> {
         personIDToFileIDs[entry.key] = fileIDs;
       }
 
+      final profileFileIDs = <String, Iterable<int>>{
+        for (final clusterID in filters.profilePersonIDs.keys)
+          clusterID: (selectedClusterToFaceIDs[clusterID] ?? const <String>[])
+              .map(getFileIdFromFaceId<int>),
+      };
       final personIDToIgnoredClusters = <String, Set<String>>{};
       for (final entry in personIDToQueryClusters.entries) {
         final ignored = <String>{}
           ..addAll(assignedClustersToAnyPerson)
           ..removeAll(entry.value)
           ..addAll(personToRejectedSuggestions[entry.key] ?? const <String>{})
-          ..addAll(excludedSuggestionClusterIDs);
+          ..addAll(excludedSuggestionClusterIDs)
+          ..addAll(
+            profileReviewExclusions(
+              personID: entry.key,
+              matches: filters.profilePersonIDs,
+              profileFileIDs: profileFileIDs,
+              personFileIDs: personIDToFileIDs[entry.key] ?? const <int>{},
+            ),
+          );
         personIDToIgnoredClusters[entry.key] = ignored;
       }
 
@@ -1717,7 +1816,12 @@ class ClusterFeedbackService<T> {
     final w = (kDebugMode ? EnteWatch('getSuggestions') : null)?..start();
     final allClusterIdsToCountMap = await mlDataDB.clusterIdToFaceCount();
     final ignoredClusters = await mlDataDB.getPersonIgnoredClusters(p.remoteID);
-    ignoredClusters.addAll(await _getExcludedSuggestionClusterIDs());
+    final filters = await _getFaceSuggestionFilters(
+      targetPersonIDs: {p.remoteID},
+      clusterCounts: allClusterIdsToCountMap,
+    );
+    ignoredClusters.addAll(filters.excluded);
+
     final personClusters = await mlDataDB.getPersonClusterIDs(p.remoteID);
     if (personClusters.isEmpty) {
       return [];
@@ -1731,6 +1835,18 @@ class ClusterFeedbackService<T> {
       '${p.data.name} has ${personClusters.length} existing clusters, getting all database data done',
     );
     final allClusterIdToFaceIDs = await mlDataDB.getAllClusterIdToFaceIDs();
+    ignoredClusters.addAll(
+      profileReviewExclusions(
+        personID: p.remoteID,
+        matches: filters.profilePersonIDs,
+        profileFileIDs: {
+          for (final clusterID in filters.profilePersonIDs.keys)
+            clusterID: (allClusterIdToFaceIDs[clusterID] ?? const <String>[])
+                .map(getFileIdFromFaceId<int>),
+        },
+        personFileIDs: personFileIDs,
+      ),
+    );
     w?.log('getAllClusterIdToFaceIDs done');
 
     final smallestPersonClusterSize = personClusters

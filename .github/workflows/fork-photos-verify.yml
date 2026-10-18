@@ -81,7 +81,11 @@ jobs:
               working-directory: mobile/apps/photos
               run: |
                   flutter analyze --no-pub
-                  flutter test --no-pub test/models/ml/body_test.dart test/models/ml/body_file_data_test.dart test/models/ml/ml_metadata_update_test.dart test/ui/viewer/people/body_crop_test.dart test/ui/viewer/people/review_thumbnail_queue_test.dart test/ui/viewer/people/review_thumbnail_test.dart
+                  flutter test --no-pub test/models/ml/body_test.dart test/models/ml/body_file_data_test.dart test/models/ml/ml_metadata_update_test.dart test/ui/viewer/people/body_crop_test.dart test/ui/viewer/people/review_thumbnail_queue_test.dart test/ui/viewer/people/review_thumbnail_test.dart test/services/machine_learning/profile_review_test.dart test/db/ml_profile_review_test.dart
+
+            - name: Verify face singleton review quality
+              working-directory: rust
+              run: cargo test --locked -p ente-photos --lib profile_review_keeps_quality_and_singleton_guards
 
             - name: Verify ML Lab diagnostics
               if: github.ref == 'refs/heads/feat/ml-lab'

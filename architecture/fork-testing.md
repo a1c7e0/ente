@@ -48,3 +48,23 @@ Run body inference from mobile or desktop. Photos Web retains upstream's desktop
 The diagnostic APK uses a separate application ID and local database; it cannot read local-only ML data from another installed app. Account-backed metadata arrives through normal encrypted sync. Anonymous local-gallery indexing can run inference and save local-gallery indexes, but grouping, crops, and review still use uploaded file IDs and the account ML database. Named people and person suggestions retain upstream account requirements. Do not extend anonymous mode with save or review operations.
 
 For ML Lab diagnostics and reset behavior, including reset scope and confirmation text, see [ML Lab](ml-lab.md). For detector evaluation details, see [mobile ML diagnostics](ml-diagnostics.md).
+
+## Profile-face review experiment
+
+The `feat/face-profile-review` branch changes mobile review eligibility only. A singleton excluded solely by the existing sideways-face flag can enter the normal review flow if it passes the existing blur/score rules and its detection score is strictly above 0.8. Its nearest person's cached cluster centroid must be at least 0.10 cosine-distance units closer than every other person's reference clusters, including people outside the current review sample. Prior rejection, same-photo conflict, and existing review mean/median checks still apply.
+
+This is a review suggestion, not an automatic merge. Automatic clustering distances (0.24/0.16), face models, embeddings, encrypted metadata, and review operations remain unchanged. Missing, stale, or invalid reference summaries suppress the extra candidates; no historical rescan is started. Desktop review and the mobile legacy global fallback (minimum cluster size 10) retain their existing behavior.
+
+Validation uses the existing mobile detector and embedding model on CFP frontal/profile data, plus a controlled image-margin cohort. In the held-out controlled cohort, five ordering seeds increased correct profile photos in person-page suggestions from 59–66 to 73–81, while wrong suggestions remained 0–1. Raw tightly cropped CFP profiles rarely passed detection, so these results do not establish a general profile-recognition accuracy improvement. The implemented Dart guard also matches the replay across all five held-out orders (290 pose-only singleton instances, 181 admitted candidate instances). This checks policy parity, not identification accuracy. Real-device testing remains necessary.
+
+Run the focused mobile tests from `mobile/apps/photos`:
+
+```sh
+flutter test --no-pub test/services/machine_learning/profile_review_test.dart test/db/ml_profile_review_test.dart
+```
+
+Run the Rust database guard test from `rust`:
+
+```sh
+cargo test --locked -p ente-photos --lib profile_review_keeps_quality_and_singleton_guards
+```

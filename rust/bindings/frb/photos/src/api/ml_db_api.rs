@@ -512,8 +512,14 @@ impl MlStore {
         Ok(self.inner.db().cluster_id_to_face_count()?)
     }
 
-    pub fn get_bad_face_singleton_cluster_ids(&self) -> Result<HashSet<String>, MlDbError> {
-        Ok(self.inner.db().get_bad_face_singleton_cluster_ids()?)
+    pub fn get_bad_face_singleton_cluster_ids(
+        &self,
+        include_sideways: bool,
+    ) -> Result<HashSet<String>, MlDbError> {
+        Ok(self
+            .inner
+            .db()
+            .get_bad_face_singleton_cluster_ids(include_sideways)?)
     }
 
     pub fn get_cluster_to_face_ids(
