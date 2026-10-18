@@ -34,6 +34,10 @@ class PersonData {
   final bool isHidden;
   final bool isPinned;
   final bool hideFromMemories;
+  // Marks an intentionally unnamed person created from a sufficiently large
+  // face cluster. Missing values remain false so legacy empty-name entities
+  // retain their ignored semantics.
+  final bool isUnnamed;
 
   String? avatarFaceID;
   List<ClusterInfo> assigned = List<ClusterInfo>.empty();
@@ -50,7 +54,10 @@ class PersonData {
   bool hasAvatar() => avatarFaceID != null;
 
   bool get isIgnored =>
-      (isHidden || name.isEmpty || name == '(hidden)' || name == '(ignored)');
+      (isHidden ||
+      (name.isEmpty && !isUnnamed) ||
+      name == '(hidden)' ||
+      name == '(ignored)');
 
   PersonData({
     required this.name,
@@ -61,6 +68,7 @@ class PersonData {
     this.isHidden = false,
     this.isPinned = false,
     this.hideFromMemories = false,
+    this.isUnnamed = false,
     this.birthDate,
     this.email,
     this.userID,
@@ -72,6 +80,7 @@ class PersonData {
     bool? isHidden,
     bool? isPinned,
     bool? hideFromMemories,
+    bool? isUnnamed,
     Object? birthDate = _personDataUnchanged,
     Object? email = _personDataUnchanged,
     Object? userID = _personDataUnchanged,
@@ -85,6 +94,9 @@ class PersonData {
       isHidden: isHidden ?? this.isHidden,
       isPinned: isPinned ?? this.isPinned,
       hideFromMemories: hideFromMemories ?? this.hideFromMemories,
+      isUnnamed: (name?.isNotEmpty ?? false)
+          ? false
+          : isUnnamed ?? this.isUnnamed,
       birthDate: identical(birthDate, _personDataUnchanged)
           ? this.birthDate
           : birthDate as String?,
@@ -126,6 +138,7 @@ class PersonData {
     'isHidden': isHidden,
     'isPinned': isPinned,
     'hideFromMemories': hideFromMemories,
+    'isUnnamed': isUnnamed,
     'birthDate': birthDate,
     'email': email,
     'userID': userID,
@@ -166,6 +179,9 @@ class PersonData {
       isHidden: json['isHidden'] as bool? ?? false,
       isPinned: json['isPinned'] as bool? ?? false,
       hideFromMemories: json['hideFromMemories'] as bool? ?? false,
+      isUnnamed:
+          (json['name'] as String? ?? '').isEmpty &&
+          (json['isUnnamed'] as bool? ?? false),
       birthDate: json['birthDate'] as String?,
       userID: json['userID'] as int?,
       email: json['email'] as String?,

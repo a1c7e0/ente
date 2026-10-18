@@ -20,6 +20,7 @@ import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/entity_service.dart";
 import "package:photos/services/machine_learning/body_person_reset_service.dart";
+import "package:photos/services/machine_learning/face_ml/person/auto_unnamed_person_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/photos_contacts_service.dart";
 import "package:photos/settings/local_settings.dart";
@@ -470,9 +471,11 @@ class PersonService {
     bool isHidden = false,
     bool isPinned = false,
     bool hideFromMemories = false,
+    bool isUnnamed = false,
     String? birthdate,
     String? email,
     int? userID,
+    String? customID,
   }) async {
     final faceIds = await faceMLDataDB.getFaceIDsForCluster(clusterID);
     final data = PersonData(
@@ -483,11 +486,17 @@ class PersonService {
       isHidden: isHidden,
       isPinned: isPinned,
       hideFromMemories: hideFromMemories,
+      isUnnamed: isUnnamed,
       birthDate: birthdate,
       email: email,
       userID: userID,
     );
-    final result = await _addOrUpdateEntity(EntityType.cgroup, data.toJson());
+    final result = await _addOrUpdateEntity(
+      EntityType.cgroup,
+      data.toJson(),
+      id: customID,
+      addWithCustomID: customID != null,
+    );
     await faceMLDataDB.assignClusterToPerson(
       personID: result.id,
       clusterID: clusterID,
@@ -498,6 +507,51 @@ class PersonService {
     memoriesCacheService.queueUpdateCache();
     return PersonEntity(result.id, data);
   }
+
+  /// Creates one stable entity per face cluster. If another device already
+  /// created it, adopt only an identical unnamed entity; never replace remote
+  /// naming, hidden state, or other person metadata.
+  Future<PersonEntity?> addUnnamedPersonForClusterIfAbsent(
+    String clusterID,
+  ) async {
+    final personID = AutoUnnamedPersonService.personEntityID(clusterID);
+    final existing = (await getPersonsMap())[personID];
+    if (existing != null) {
+      return _isSameAutoUnnamedCluster(existing, clusterID) ? existing : null;
+    }
+    try {
+      return await addPerson(
+        name: "",
+        clusterID: clusterID,
+        isUnnamed: true,
+        customID: personID,
+      );
+    } catch (error, stackTrace) {
+      logger.info(
+        "Auto-unnamed person creation raced or failed for cluster $clusterID: $error",
+      );
+      try {
+        await sync();
+        final racedPerson = (await getPersonsMap())[personID];
+        if (racedPerson != null &&
+            _isSameAutoUnnamedCluster(racedPerson, clusterID)) {
+          return racedPerson;
+        }
+      } catch (syncError, syncStackTrace) {
+        logger.warning(
+          "Could not read auto-unnamed person after create failure",
+          syncError,
+          syncStackTrace,
+        );
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  bool _isSameAutoUnnamedCluster(PersonEntity person, String clusterID) =>
+      person.data.isUnnamed &&
+      person.data.name.isEmpty &&
+      person.data.assigned.any((cluster) => cluster.id == clusterID);
 
   Future<void> removeClusterToPerson({
     required String personID,
@@ -992,8 +1046,14 @@ class PersonService {
     EntityType type,
     Map<String, dynamic> jsonMap, {
     String? id,
+    bool addWithCustomID = false,
   }) async {
-    final result = await entityService.addOrUpdate(type, jsonMap, id: id);
+    final result = await entityService.addOrUpdate(
+      type,
+      jsonMap,
+      id: id,
+      addWithCustomID: addWithCustomID,
+    );
     _invalidatePersonCache();
     return result;
   }

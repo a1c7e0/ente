@@ -109,7 +109,9 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
               return Center(
                 child: Text(
                   context.strings.noSuggestionsForPerson(
-                    personName: widget.person.data.name,
+                    personName: widget.person.data.isUnnamed
+                        ? context.strings.sameperson
+                        : widget.person.data.name,
                   ),
                   style: getEnteTextTheme(context).largeMuted,
                 ),
@@ -473,10 +475,15 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
             "ClusterID: $clusterID, Distance: ${distance.toStringAsFixed(3)}, usingMean: $usingMean",
             style: getEnteTextTheme(context).smallMuted,
           ),
-        Text(
-          "${widget.person.data.name}?",
-          style: getEnteTextTheme(context).largeMuted,
-        ),
+        widget.person.data.isUnnamed
+            ? Text(
+                context.strings.sameperson,
+                style: getEnteTextTheme(context).largeMuted,
+              )
+            : Text(
+                "${widget.person.data.name}?",
+                style: getEnteTextTheme(context).largeMuted,
+              ),
         const SizedBox(height: 24),
         _buildThumbnailWidget(files, clusterID),
         const SizedBox(height: 24.0),

@@ -51,6 +51,7 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
 
   late double _autoMergeThreshold;
   late double _defaultClusteringDistance;
+  late int _autoUnnamedPersonPhotoThreshold;
   late bool _persistAutoMergeThreshold;
   late bool _persistDefaultClusteringDistance;
 
@@ -85,6 +86,8 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
         ),
       );
     }
+    _autoUnnamedPersonPhotoThreshold =
+        localSettings.autoUnnamedPersonPhotoThreshold;
   }
 
   @override
@@ -471,7 +474,50 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
           max: _clusteringMax,
           onChanged: _updateDefaultClusteringDistance,
         ),
+        _buildAutoUnnamedThresholdItem(context),
       ],
+    );
+  }
+
+  Widget _buildAutoUnnamedThresholdItem(BuildContext context) {
+    final textTheme = getEnteTextTheme(context);
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("Auto-create unnamed people", style: textTheme.smallBold),
+          const SizedBox(height: 4),
+          Text(
+            "Create an unnamed person for an unassigned face cluster after it appears in this many distinct uploaded photos. Set to 0 to disable.",
+            style: textTheme.miniMuted,
+          ),
+          Slider(
+            value: _autoUnnamedPersonPhotoThreshold.toDouble(),
+            min: 0,
+            max: 100,
+            divisions: 100,
+            label: _autoUnnamedPersonPhotoThreshold == 0
+                ? "Off"
+                : "$_autoUnnamedPersonPhotoThreshold photos",
+            onChanged: (value) {
+              final threshold = value.round();
+              setState(() => _autoUnnamedPersonPhotoThreshold = threshold);
+              unawaited(
+                localSettings.setAutoUnnamedPersonPhotoThreshold(threshold),
+              );
+            },
+          ),
+          Text(
+            _autoUnnamedPersonPhotoThreshold == 0
+                ? "Current: Off"
+                : "Current: $_autoUnnamedPersonPhotoThreshold photos",
+            style: textTheme.miniMuted,
+          ),
+          const SizedBox(height: 4),
+          Text("Default: 10 photos", style: textTheme.miniMuted),
+        ],
+      ),
     );
   }
 
