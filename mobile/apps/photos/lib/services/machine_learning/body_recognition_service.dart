@@ -36,6 +36,10 @@ class BodyRecognitionService {
       imagePath: path,
       assetsDir: await MLModelDownloadService.instance.getAssetsDirectory(),
     );
+    return fromRust(result, faces);
+  }
+
+  static BodyIndex fromRust(rust.RustBodyIndex result, List<Face> faces) {
     final usedFaces = <String>{};
     final bodies = <BodyDetection>[];
     for (final body in result.detections) {
@@ -104,6 +108,7 @@ class BodyRecognitionService {
         data.entries.every((e) => _rawIndexes[e.key] == e.value)) {
       return _parsedIndexes;
     }
+
     final result = <int, BodyIndex>{};
     for (final entry in data.entries) {
       try {
@@ -117,6 +122,14 @@ class BodyRecognitionService {
     _parsedIndexes = result;
     _indexRevision++;
     return result;
+  }
+
+  void invalidateCaches() {
+    _rawIndexes = {};
+    _parsedIndexes = {};
+    _indexRevision++;
+    _matchKey = null;
+    _matches = const [];
   }
 
   Future<List<BodyMatch>> matches(List<EnteFile> files) async {

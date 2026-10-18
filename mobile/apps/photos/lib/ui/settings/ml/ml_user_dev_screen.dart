@@ -89,6 +89,27 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
         ),
         const SizedBox(height: 48),
         widget.mlIsEnabled
+            ? MenuComponent(
+                title: "Show ML debug options",
+                trailing: ToggleSwitchComponent.async(
+                  value: () => localSettings.showMLDebugOptions,
+                  onChanged: () async {
+                    try {
+                      await localSettings.setShowMLDebugOptions(
+                        !localSettings.showMLDebugOptions,
+                      );
+                      if (mounted) setState(() {});
+                    } catch (e, s) {
+                      _logger.warning("ML debug options toggle failed", e, s);
+                      if (!context.mounted) return;
+                      await showGenericErrorDialog(context: context, error: e);
+                    }
+                  },
+                ),
+              )
+            : const SizedBox.shrink(),
+        widget.mlIsEnabled ? const SizedBox(height: 24) : const SizedBox(),
+        widget.mlIsEnabled
             ? ButtonWidget(
                 buttonType: ButtonType.neutral,
                 labelText: "Purge empty indices",

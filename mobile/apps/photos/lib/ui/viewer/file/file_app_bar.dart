@@ -25,6 +25,7 @@ import 'package:photos/module/download/gallery.dart';
 import "package:photos/service_locator.dart";
 import 'package:photos/services/collections_service.dart';
 import 'package:photos/services/hidden_service.dart';
+import "package:photos/services/machine_learning/ml_service.dart";
 import "package:photos/services/video_preview_service.dart";
 import "package:photos/states/detail_page_state.dart";
 import "package:photos/theme/colors.dart";
@@ -292,6 +293,7 @@ class FileAppBarState extends State<FileAppBar> {
           hugeIcon: HugeIcons.strokeRoundedInformationCircle,
         ),
       );
+
     } else {
       if (isFileUploaded) {
         items.add(
@@ -384,6 +386,19 @@ class FileAppBarState extends State<FileAppBar> {
           hugeIcon: HugeIcons.strokeRoundedInformationCircle,
         ),
       );
+
+      if (!isLocalGalleryMode &&
+          localSettings.showMLDebugOptions &&
+          isOwnedByUser &&
+          isFileUploaded) {
+        items.add(
+          _fileMenuOption(
+            "Re-calculate ML Data",
+            value: 16,
+            hugeIcon: HugeIcons.strokeRoundedReload,
+          ),
+        );
+      }
     }
 
     if (widget.file.isVideo && !restrictFileActions) {
@@ -542,7 +557,38 @@ class FileAppBarState extends State<FileAppBar> {
       if (state?.canChangeStream ?? false) {
         state!.onStreamChange();
       }
+    } else if (value == 16) {
+      await _recalculateMLData();
     }
+  }
+
+  Future<void> _recalculateMLData() async {
+    await showChoiceDialog(
+      context,
+      title: "Re-calculate ML data?",
+      body:
+          "This will clear the current face, body, and CLIP indexes and their person/group associations for this photo, then run ML again. The photo and other metadata will stay unchanged.",
+      firstButtonLabel: "Re-calculate",
+      isCritical: true,
+      firstButtonOnTap: () async {
+        try {
+          final recalculated = await MLService.instance.recalculateFile(
+            widget.file,
+          );
+          if (!mounted) return;
+          if (recalculated) {
+            showToast(context, "ML data recalculated");
+          } else {
+            showShortToast(context, "ML data could not be recalculated");
+          }
+        } catch (e, s) {
+          _logger.severe("Failed to recalculate ML data", e, s);
+          if (mounted) {
+            await showGenericErrorDialog(context: context, error: e);
+          }
+        }
+      },
+    );
   }
 
   Future<void> _handleSuggestDelete(Collection collection) async {

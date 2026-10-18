@@ -108,6 +108,7 @@ class LocalSettings {
       "ml_debug.default_clustering_distance";
   static const _kRunMLDuringInteractionOverride =
       "ml_debug.run_ml_during_interaction";
+  static const _kShowMLDebugOptions = "ml_debug.show_ml_debug_options";
   static const _kSemanticSearchExactInRustEnabled =
       "ml_debug.semantic_search_exact_in_rust";
   static const _kRustMlDbOverride = "ls.rust_ml_db_override";
@@ -418,6 +419,12 @@ class LocalSettings {
 
   Future<void> setRunMLDuringInteractionOverride(bool value) async {
     await _prefs.setBool(_kRunMLDuringInteractionOverride, value);
+  }
+
+  bool get showMLDebugOptions => _prefs.getBool(_kShowMLDebugOptions) ?? false;
+
+  Future<void> setShowMLDebugOptions(bool value) async {
+    await _prefs.setBool(_kShowMLDebugOptions, value);
   }
 
   bool get semanticSearchExactInRustEnabled =>

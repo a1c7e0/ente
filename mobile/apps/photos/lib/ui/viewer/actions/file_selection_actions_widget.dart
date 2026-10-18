@@ -33,6 +33,8 @@ import 'package:photos/services/collections_service.dart';
 import 'package:photos/services/hidden_service.dart';
 import 'package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart';
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
+import "package:photos/services/machine_learning/ml_photo_reset_service.dart";
+import "package:photos/services/machine_learning/ml_process_lock.dart";
 import "package:photos/theme/colors.dart";
 import "package:photos/theme/ente_theme.dart";
 import 'package:photos/ui/actions/collection/collection_file_actions.dart';
@@ -559,6 +561,23 @@ class _FileSelectionActionsWidgetState
         );
       }
 
+      final resettableFiles = widget.selectedFiles.files
+          .where((file) => file.isOwner && file.uploadedFileID != null)
+          .toList();
+      final allSelectedFilesAreResettable =
+          resettableFiles.length == widget.selectedFiles.files.length;
+      if (!isLocalGalleryMode && localSettings.showMLDebugOptions) {
+        items.add(
+          SelectionSheetAction(
+            hugeIcon: HugeIcons.strokeRoundedReload,
+            labelText: "ML full reset",
+            shouldShow: allSelectedFilesAreResettable,
+            onTap: () => _resetSelectedML(resettableFiles),
+            isCritical: true,
+          ),
+        );
+      }
+
       items.add(
         SelectionSheetAction(
           hugeIcon: HugeIcons.strokeRoundedIncognito,
@@ -572,6 +591,51 @@ class _FileSelectionActionsWidgetState
       actions: items,
       selectionControls: widget.selectionControls,
       backgroundColor: widget.backgroundColor,
+    );
+  }
+
+  Future<void> _resetSelectedML(List<EnteFile> files) async {
+    await showChoiceDialog(
+      context,
+      title: "Reset ML data?",
+      body:
+          "This will remove face, body, and CLIP data and their person/group associations from ${files.length} owned, uploaded photo(s). The original photos and other metadata stay unchanged. ML will not run again automatically.",
+      firstButtonLabel: "Reset ML data",
+      isCritical: true,
+      firstButtonOnTap: () async {
+        try {
+          MLPhotoResetResult? result;
+          final attempt = await MlProcessLock.instance.tryRunExclusive(
+            MlOperation.clearData,
+            () async {
+              result = await MLPhotoResetService.instance.reset(files);
+            },
+            background: false,
+            waitForAvailability: true,
+            waitDeadline: const Duration(minutes: 3),
+          );
+          if (attempt != MlLockAttempt.ran) {
+            throw StateError("Could not acquire the ML lock: ${attempt.name}");
+          }
+          if (result!.failedFileIDs.isNotEmpty) {
+            throw StateError(
+              "Reset ${result!.resetPhotoCount} photo(s); "
+              "${result!.failedFileIDs.length} failed. First failed file ID: "
+              "${result!.failedFileIDs.first}. Keep the selection and retry.",
+            );
+          }
+          widget.selectedFiles.clearAll();
+          if (!context.mounted) return;
+          showShortToast(
+            context,
+            "Reset ML data for ${result!.resetPhotoCount} photo(s)",
+          );
+        } catch (e, s) {
+          _logger.severe("Failed to reset selected ML data", e, s);
+          if (!context.mounted) return;
+          await showGenericErrorDialog(context: context, error: e);
+        }
+      },
     );
   }
 
