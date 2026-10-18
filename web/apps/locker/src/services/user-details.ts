@@ -11,6 +11,7 @@ interface LockerUserProfileResponse {
 }
 
 interface LockerUsageResponse {
+    quotaMode?: "sharedStorage";
     isPaid?: boolean;
     isFamily?: boolean;
     usedFileCount?: number;
@@ -36,6 +37,13 @@ export const loadLockerUsage = async (
     const isFamily = !!lockerUsage.isFamily;
     return {
         userDetails: {
+            ...(lockerUsage.quotaMode === "sharedStorage"
+                ? {
+                      quotaMode: lockerUsage.quotaMode,
+                      remainingStorage: lockerUsage.remainingStorage,
+                      userStorage: lockerUsage.userStorage,
+                  }
+                : {}),
             usage: lockerUsage.usedStorage ?? 0,
             storageLimit: lockerUsage.storageLimit ?? 0,
             fileCount: isFamily

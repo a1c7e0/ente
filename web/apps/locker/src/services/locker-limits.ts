@@ -4,8 +4,11 @@ export const LOCKER_STORAGE_LIMIT_PAID_BYTES = 10 * 1024 * 1024 * 1024;
 export const LOCKER_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 * 1024;
 
 export interface LockerUploadLimitState {
+    quotaMode?: "sharedStorage";
     usage: number;
     storageLimit: number;
+    remainingStorage?: number;
+    userStorage?: number;
     fileCount: number;
     lockerFileLimit: number;
     isPartOfFamily: boolean;
@@ -41,7 +44,12 @@ export const lockerUploadAllowance = (
         maxFileCount,
         currentFileCount,
         remainingFileCount: Math.max(maxFileCount - currentFileCount, 0),
-        freeStorage: Math.max(userDetails.storageLimit - userDetails.usage, 0),
+        freeStorage: Math.max(
+            userDetails.quotaMode === "sharedStorage"
+                ? (userDetails.remainingStorage ?? 0)
+                : userDetails.storageLimit - userDetails.usage,
+            0,
+        ),
     };
 };
 
@@ -51,6 +59,8 @@ export const exceedsPaidLockerHardLimit = (
 ) => {
     const allowance = lockerUploadAllowance(userDetails);
     const totalUploadSize = files.reduce((total, file) => total + file.size, 0);
+
+    if (userDetails.quotaMode === "sharedStorage") return false;
 
     return (
         allowance.currentFileCount + files.length > LOCKER_FILE_LIMIT_PAID ||
@@ -74,7 +84,10 @@ export const validateLockerUploadBatch = (
     }
 
     const allowance = lockerUploadAllowance(userDetails);
-    if (files.length > allowance.remainingFileCount) {
+    if (
+        userDetails.quotaMode !== "sharedStorage" &&
+        files.length > allowance.remainingFileCount
+    ) {
         return { reason: "fileCountLimit" };
     }
 

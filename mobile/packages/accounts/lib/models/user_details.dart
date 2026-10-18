@@ -15,6 +15,7 @@ class UserDetails {
   final ProfileData? profileData;
   final BonusData? bonusData;
   final LockerFamilyUsage? lockerFamilyUsage;
+  final String? lockerQuotaMode;
 
   const UserDetails(
     this.email,
@@ -26,8 +27,11 @@ class UserDetails {
     this.familyData,
     this.profileData,
     this.bonusData,
-    this.lockerFamilyUsage,
-  );
+    this.lockerFamilyUsage, {
+    this.lockerQuotaMode,
+  });
+
+  bool get usesSharedStorageForLocker => lockerQuotaMode == 'sharedStorage';
 
   static const int _lockerFileLimitFree = 100;
   static const int _lockerFileLimitPaid = 1000;
@@ -79,6 +83,15 @@ class UserDetails {
 
   int getFreeStorage() {
     final int? memberLimit = familyMemberStorageLimit();
+    if (usesSharedStorageForLocker && memberLimit != null) {
+      return max(
+        min(
+          memberLimit - usage,
+          getTotalStorage() - getFamilyOrPersonalUsage(),
+        ),
+        0,
+      );
+    }
     if (memberLimit != null) {
       return max(memberLimit - usage, 0);
     }
@@ -121,6 +134,7 @@ class UserDetails {
       ProfileData.fromJson(map['profileData']),
       BonusData.fromJson(map['bonusData']),
       LockerFamilyUsage.fromJson(map['lockerFamilyUsage']),
+      lockerQuotaMode: map['lockerQuotaMode'] as String?,
     );
   }
 
@@ -136,6 +150,7 @@ class UserDetails {
       'profileData': profileData?.toJson(),
       'bonusData': bonusData?.toJson(),
       'lockerFamilyUsage': lockerFamilyUsage?.toJson(),
+      'lockerQuotaMode': lockerQuotaMode,
     };
   }
 

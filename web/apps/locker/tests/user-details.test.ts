@@ -78,6 +78,66 @@ test.each([false, true])("usage counts for family=%s", async (isFamily) => {
     expect(fetchMock).toHaveBeenCalledWith("/users/locker-usage", { headers });
 });
 
+test.each([0, 512])(
+    "maps shared storage usage fields including remainingStorage=%s",
+    async (remainingStorage) => {
+        fetchMock.mockResolvedValue(
+            Response.json({
+                quotaMode: "sharedStorage",
+                isPaid: true,
+                isFamily: true,
+                usedFileCount: 80,
+                userFileCount: 12,
+                usedStorage: 900,
+                userStorage: 300,
+                storageLimit: 2_000,
+                remainingStorage,
+                fileLimit: 100,
+            }),
+        );
+
+        expect(await loadLockerUsage()).toEqual({
+            userDetails: {
+                quotaMode: "sharedStorage",
+                remainingStorage,
+                userStorage: 300,
+                usage: 900,
+                storageLimit: 2_000,
+                fileCount: 12,
+                lockerFileLimit: 100,
+                isPartOfFamily: true,
+                lockerFamilyFileCount: 80,
+            },
+        });
+    },
+);
+
+test("unknown quota modes retain the legacy response shape", async () => {
+    fetchMock.mockResolvedValue(
+        Response.json({
+            quotaMode: "futureMode",
+            isFamily: false,
+            usedFileCount: 9,
+            usedStorage: 100,
+            userStorage: 70,
+            remainingStorage: 50,
+            storageLimit: 500,
+            fileLimit: 25,
+        }),
+    );
+
+    expect(await loadLockerUsage()).toEqual({
+        userDetails: {
+            usage: 100,
+            storageLimit: 500,
+            fileCount: 9,
+            lockerFileLimit: 25,
+            isPartOfFamily: false,
+            lockerFamilyFileCount: undefined,
+        },
+    });
+});
+
 test.each([
     [{ email: "server@example.org" }, "server@example.org"],
     [{ email: "" }, ""],

@@ -1,5 +1,6 @@
 import "package:ente_accounts/models/user_details.dart";
 import 'package:ente_components/ente_components.dart';
+import "package:ente_pure_utils/ente_pure_utils.dart";
 import "package:ente_strings/ente_strings.dart";
 import "package:ente_ui/components/loading_widget.dart";
 import "package:flutter/material.dart";
@@ -99,30 +100,49 @@ class _UsageContent extends StatelessWidget {
 
     final cardText = colors.specialWhite;
     final cardTextMuted = cardText.withValues(alpha: 0.7);
+    final sharedStorage = userDetails?.usesSharedStorageForLocker ?? false;
     final maxFileCount = _effectiveLockerFileLimit(
       userDetails,
     ).clamp(1, double.maxFinite).toInt();
     final userFileCount = userDetails?.fileCount ?? 0;
 
-    final showFamilyBreakup = _shouldShowFamilyBreakup();
+    final showFamilyBreakup = _shouldShowFamilyBreakup(sharedStorage);
+
+    final totalStorage = userDetails?.getTotalStorage() ?? 0;
+    final usedStorage = userDetails?.getFamilyOrPersonalUsage() ?? 0;
+    final personalStorageUsage = userDetails?.usage ?? 0;
 
     final userProgress = isLoading
         ? 0.0
+        : sharedStorage
+        ? (totalStorage <= 0 ? 0.0 : personalStorageUsage / totalStorage).clamp(
+            0.0,
+            1.0,
+          )
         : (userFileCount / maxFileCount).clamp(0.0, 1.0);
     final familyProgress = showFamilyBreakup && !isLoading
-        ? (userDetails!.lockerFamilyUsage!.familyFileCount / maxFileCount)
-              .clamp(0.0, 1.0)
+        ? sharedStorage
+              ? (totalStorage <= 0 ? 0.0 : usedStorage / totalStorage).clamp(
+                  0.0,
+                  1.0,
+                )
+              : (userDetails!.lockerFamilyUsage!.familyFileCount / maxFileCount)
+                    .clamp(0.0, 1.0)
         : 0.0;
 
-    final formattedUsed = NumberFormat().format(userFileCount);
-    final formattedMax = NumberFormat().format(maxFileCount);
+    final formattedUsed = sharedStorage
+        ? formatBytes(usedStorage)
+        : NumberFormat().format(userFileCount);
+    final formattedMax = sharedStorage
+        ? formatBytes(totalStorage)
+        : NumberFormat().format(maxFileCount);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          context.strings.itemsStored,
+          sharedStorage ? context.strings.storage : context.strings.itemsStored,
           style: TextStyles.large.copyWith(color: cardTextMuted),
         ),
         const SizedBox(height: 4),
@@ -228,10 +248,10 @@ class _UsageContent extends StatelessWidget {
     );
   }
 
-  bool _shouldShowFamilyBreakup() {
+  bool _shouldShowFamilyBreakup(bool sharedStorage) {
     if (userDetails == null) return false;
     if (!userDetails!.isPartOfFamily()) return false;
-    return userDetails!.lockerFamilyUsage != null;
+    return sharedStorage || userDetails!.lockerFamilyUsage != null;
   }
 
   int _effectiveLockerFileLimit(UserDetails? userDetails) {
