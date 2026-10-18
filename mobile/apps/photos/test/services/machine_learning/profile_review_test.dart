@@ -32,7 +32,7 @@ void main() {
   });
 
   test("admits a clear singleton for its nearest person", () {
-    expect(profileReviewMatches(args), {"profile": "alice"});
+    _expectAliceMatch(profileReviewMatches(args));
   });
 
   test(
@@ -48,11 +48,18 @@ void main() {
     expect(profileReviewMatches(args), isEmpty);
   });
 
+  test("requires a wider gap before suggesting a review target", () {
+    summaries["bob-front"] = (_centroid(0.7), 5);
+    expect(profileReviewMatches(args), isEmpty);
+    summaries["bob-front"] = (_centroid(0.6), 5);
+    _expectAliceMatch(profileReviewMatches(args));
+  });
+
   test("different clusters of the same person do not compete", () {
     summaries["alice-profile"] = (_centroid(0.79), 2);
     counts["alice-profile"] = 2;
     people["alice"]!.add("alice-profile");
-    expect(profileReviewMatches(args), {"profile": "alice"});
+    _expectAliceMatch(profileReviewMatches(args));
   });
 
   test("uses every reference cluster for competing people", () {
@@ -88,7 +95,7 @@ void main() {
 
   test("supports a single known person without inventing a second match", () {
     people.remove("bob");
-    expect(profileReviewMatches(args), {"profile": "alice"});
+    _expectAliceMatch(profileReviewMatches(args));
   });
 
   test("rejects invalid reference dimensions, norms and nonfinite values", () {
@@ -109,16 +116,52 @@ void main() {
   });
 
   test(
+    "adds a profile directly to manual review beyond normal suggestions",
+    () {
+      expect(
+        mergeProfileReviewSuggestions(
+          suggestions: [("existing", 0.3, true), ("profile", 0.4, false)],
+          personID: "alice",
+          profileMatches: {
+            "profile": ("alice", 0.6),
+            "already-listed": ("alice", 0.2),
+            "other-person": ("bob", 0.1),
+          },
+        ),
+        [
+          ("existing", 0.3, true),
+          ("profile", 0.4, false),
+          ("already-listed", 0.2, false),
+        ],
+      );
+    },
+  );
+
+  test(
+    "surfaces profile review candidates when normal suggestions are empty",
+    () {
+      expect(
+        mergeProfileReviewSuggestions(
+          suggestions: const [],
+          personID: "alice",
+          profileMatches: {"profile": ("alice", 0.6)},
+        ),
+        [("profile", 0.6, false)],
+      );
+    },
+  );
+
+  test(
     "does not offer a profile to another person or to a co-occurring face",
     () {
       expect(
         profileReviewExclusions(
           personID: "alice",
           matches: {
-            "clear": "alice",
-            "same-photo": "alice",
-            "other-person": "bob",
-            "missing-photo": "alice",
+            "clear": ("alice", 0.2),
+            "same-photo": ("alice", 0.2),
+            "other-person": ("bob", 0.1),
+            "missing-photo": ("alice", 0.2),
           },
           profileFileIDs: {
             "clear": [1],
@@ -136,3 +179,9 @@ void main() {
 Uint8List _centroid(double cosine) => EVector(
   values: [cosine, sqrt(1 - cosine * cosine), ...List<double>.filled(190, 0)],
 ).writeToBuffer();
+
+void _expectAliceMatch(Map<String, (String, double)> matches) {
+  expect(matches.keys, {"profile"});
+  expect(matches["profile"]!.$1, "alice");
+  expect(matches["profile"]!.$2, closeTo(0.2, 1e-5));
+}
