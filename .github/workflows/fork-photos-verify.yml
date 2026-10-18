@@ -87,6 +87,10 @@ jobs:
               working-directory: rust
               run: cargo test --locked -p ente-photos --lib profile_review_keeps_quality_and_singleton_guards
 
+            - name: Verify ML reset and synchronization
+              working-directory: mobile/apps/photos
+              run: flutter test --no-pub test/models/ml/face/person_cache_test.dart test/services/machine_learning/ml_photo_reset_service_test.dart test/services/machine_learning/metadata_sync_lock_test.dart
+
             - name: Verify ML Lab diagnostics
               if: github.ref == 'refs/heads/feat/ml-lab'
               working-directory: mobile/apps/photos
