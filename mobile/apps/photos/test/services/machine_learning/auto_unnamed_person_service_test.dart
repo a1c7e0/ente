@@ -1,4 +1,5 @@
 import "package:flutter_test/flutter_test.dart";
+import "package:photos/models/ml/face/person.dart";
 import "package:photos/services/machine_learning/face_ml/person/auto_unnamed_person_service.dart";
 
 void main() {
@@ -35,7 +36,74 @@ void main() {
       expect(eligible, ["unassigned-cluster"]);
     });
 
-    test("zero disables creation and deterministic IDs are stable", () {
+    test("excludes clusters assigned to named and hidden people", () {
+      final persons = [
+        PersonEntity(
+          "named-person",
+          PersonData(
+            name: "Alex",
+            assigned: [
+              ClusterInfo(id: "named-cluster", faces: {"1_0"}),
+            ],
+          ),
+        ),
+        PersonEntity(
+          "hidden-person",
+          PersonData(
+            name: "",
+            isHidden: true,
+            assigned: [
+              ClusterInfo(id: "hidden-cluster", faces: {"2_0"}),
+            ],
+          ),
+        ),
+      ];
+      final eligible = AutoUnnamedPersonService.eligibleClusters(
+        threshold: 1,
+        clusterToFaceIDs: {
+          "named-cluster": ["1_0"],
+          "hidden-cluster": ["2_0"],
+          "unassigned-cluster": ["3_0"],
+        },
+        assignedClusterIDs: AutoUnnamedPersonService.assignedClusterIDs(
+          persons,
+        ),
+        assignedFaceIDs: AutoUnnamedPersonService.assignedFaceIDs(persons),
+        uploadedFileIDs: {1, 2, 3},
+      );
+
+      expect(eligible, ["unassigned-cluster"]);
+    });
+
+    test("an existing unnamed person prevents duplicate selection", () {
+      final existingUnnamed = PersonEntity(
+        "person-id",
+        PersonData(
+          name: "",
+          isUnnamed: true,
+          assigned: [
+            ClusterInfo(id: "cluster", faces: {"1_0"}),
+          ],
+        ),
+      );
+      final eligible = AutoUnnamedPersonService.eligibleClusters(
+        threshold: 1,
+        clusterToFaceIDs: {
+          "cluster": ["1_0"],
+        },
+        assignedClusterIDs: AutoUnnamedPersonService.assignedClusterIDs([
+          existingUnnamed,
+        ]),
+        assignedFaceIDs: AutoUnnamedPersonService.assignedFaceIDs([
+          existingUnnamed,
+        ]),
+        uploadedFileIDs: {1},
+      );
+
+      expect(eligible, isEmpty);
+    });
+
+    test("zero disables creation", () {
       expect(
         AutoUnnamedPersonService.eligibleClusters(
           threshold: 0,
@@ -47,14 +115,6 @@ void main() {
           uploadedFileIDs: {1},
         ),
         isEmpty,
-      );
-      expect(
-        AutoUnnamedPersonService.personEntityID("cluster"),
-        AutoUnnamedPersonService.personEntityID("cluster"),
-      );
-      expect(
-        AutoUnnamedPersonService.personEntityID("cluster-a"),
-        isNot(AutoUnnamedPersonService.personEntityID("cluster-b")),
       );
     });
 

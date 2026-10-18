@@ -489,7 +489,7 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
           Text("Auto-create unnamed people", style: textTheme.smallBold),
           const SizedBox(height: 4),
           Text(
-            "Create an unnamed person for an unassigned face cluster after it appears in this many distinct uploaded photos. Set to 0 to disable.",
+            "Create an unnamed person for an unassigned face cluster after it appears in this many distinct uploaded photos. Applied on the next normal ML run or manual clustering command. Set to 0 to disable.",
             style: textTheme.miniMuted,
           ),
           Slider(

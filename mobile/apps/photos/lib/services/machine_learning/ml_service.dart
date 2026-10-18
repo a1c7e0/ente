@@ -520,6 +520,11 @@ class MLService {
         _logRunStopped(control, "after post-run person sync");
         return MlRunDisposition.stopped;
       }
+      await _createEligibleUnnamedPersons(control: control);
+      if (control.stopRequested) {
+        _logRunStopped(control, "after unnamed person creation");
+        return MlRunDisposition.stopped;
+      }
       if (_mlControllerStatus == true) {
         await magicCacheService.updateCache(forced: force);
         if (control.stopRequested) {
@@ -836,11 +841,16 @@ class MLService {
     final attempt = await _runExclusiveWithControl(
       MlOperation.clustering,
       control,
-      () => _clusterAllImages(
-        clusterInBuckets: clusterInBuckets,
-        force: force,
-        control: control,
-      ),
+      () async {
+        await _clusterAllImages(
+          clusterInBuckets: clusterInBuckets,
+          force: force,
+          control: control,
+        );
+        if (!control.stopRequested) {
+          await _createEligibleUnnamedPersons(control: control);
+        }
+      },
     );
     if (attempt != MlLockAttempt.ran) {
       _logger.info(
@@ -926,9 +936,6 @@ class MLService {
 
       if (allFaceInfoForClustering.every((face) => face.clusterId != null)) {
         _logger.info('All faces clustered');
-        if (!control.stopRequested) {
-          await _createEligibleUnnamedPersons();
-        }
         _logger.info(
           'clusterAllImages() finished, in '
           '${DateTime.now().difference(clusterAllImagesTime).inSeconds} seconds',
@@ -1051,9 +1058,6 @@ class MLService {
           '${DateTime.now().difference(clusterDoneTime).inSeconds} seconds',
         );
       }
-      if (!control.stopRequested) {
-        await _createEligibleUnnamedPersons();
-      }
       _logger.info(
         'clusterAllImages() finished, in '
         '${DateTime.now().difference(clusterAllImagesTime).inSeconds} seconds',
@@ -1065,7 +1069,24 @@ class MLService {
     }
   }
 
-  Future<void> _createEligibleUnnamedPersons() async {
+  Future<void> _createEligibleUnnamedPersons({
+    required MlRunControl control,
+  }) async {
+    try {
+      await _createEligibleUnnamedPersonsSafely(control: control);
+    } catch (error, stackTrace) {
+      _logger.warning(
+        "Auto-unnamed person pass failed; continuing ML run",
+        error,
+        stackTrace,
+      );
+    }
+  }
+
+  Future<void> _createEligibleUnnamedPersonsSafely({
+    required MlRunControl control,
+  }) async {
+    if (control.stopRequested) return;
     if (isLocalGalleryMode) return;
     final threshold = localSettings.autoUnnamedPersonPhotoThreshold;
     if (threshold <= 0) return;
@@ -1082,14 +1103,11 @@ class MLService {
     final persons = await personService.getPersons();
     final dbMappings = await _mlDataDB.getPersonToClusterIdToFaceIds();
     final assignedClusterIDs = <String>{
-      for (final person in persons)
-        for (final cluster in person.data.assigned) cluster.id,
+      ...AutoUnnamedPersonService.assignedClusterIDs(persons),
       for (final clusters in dbMappings.values) ...clusters.keys,
     };
     final assignedFaceIDs = <String>{
-      for (final person in persons)
-        for (final cluster in person.data.assigned) ...cluster.faces,
-      for (final person in persons) ...person.data.rejectedFaceIDs,
+      ...AutoUnnamedPersonService.assignedFaceIDs(persons),
       for (final clusters in dbMappings.values)
         for (final faceIDs in clusters.values) ...faceIDs,
     };
@@ -1104,20 +1122,22 @@ class MLService {
 
     var created = 0;
     for (final clusterID in candidates) {
+      if (control.stopRequested ||
+          isLocalGalleryMode ||
+          Configuration.instance.getUserID() != ownerID) {
+        break;
+      }
       // Re-check immediately before each entity creation. Another local action
       // or a feedback sync may have assigned this cluster since selection.
       final currentPersons = await personService.getPersons();
       final currentMappings = await _mlDataDB.getPersonToClusterIdToFaceIds();
       final currentlyAssignedClusters = <String>{
-        for (final person in currentPersons)
-          for (final cluster in person.data.assigned) cluster.id,
+        ...AutoUnnamedPersonService.assignedClusterIDs(currentPersons),
         for (final clusters in currentMappings.values) ...clusters.keys,
       };
       if (currentlyAssignedClusters.contains(clusterID)) continue;
       final currentAssignedFaceIDs = <String>{
-        for (final person in currentPersons)
-          for (final cluster in person.data.assigned) ...cluster.faces,
-        for (final person in currentPersons) ...person.data.rejectedFaceIDs,
+        ...AutoUnnamedPersonService.assignedFaceIDs(currentPersons),
         for (final clusters in currentMappings.values)
           for (final faceIDs in clusters.values) ...faceIDs,
       };
@@ -1125,6 +1145,11 @@ class MLService {
         currentAssignedFaceIDs.contains,
       )) {
         continue;
+      }
+      if (control.stopRequested ||
+          isLocalGalleryMode ||
+          Configuration.instance.getUserID() != ownerID) {
+        break;
       }
       try {
         final createdPerson = await personService

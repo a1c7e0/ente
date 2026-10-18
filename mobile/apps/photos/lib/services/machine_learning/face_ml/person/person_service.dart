@@ -20,7 +20,6 @@ import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/entity_service.dart";
 import "package:photos/services/machine_learning/body_person_reset_service.dart";
-import "package:photos/services/machine_learning/face_ml/person/auto_unnamed_person_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/photos_contacts_service.dart";
 import "package:photos/settings/local_settings.dart";
@@ -475,7 +474,6 @@ class PersonService {
     String? birthdate,
     String? email,
     int? userID,
-    String? customID,
   }) async {
     final faceIds = await faceMLDataDB.getFaceIDsForCluster(clusterID);
     final data = PersonData(
@@ -491,12 +489,7 @@ class PersonService {
       email: email,
       userID: userID,
     );
-    final result = await _addOrUpdateEntity(
-      EntityType.cgroup,
-      data.toJson(),
-      id: customID,
-      addWithCustomID: customID != null,
-    );
+    final result = await _addOrUpdateEntity(EntityType.cgroup, data.toJson());
     await faceMLDataDB.assignClusterToPerson(
       personID: result.id,
       clusterID: clusterID,
@@ -508,50 +501,30 @@ class PersonService {
     return PersonEntity(result.id, data);
   }
 
-  /// Creates one stable entity per face cluster. If another device already
-  /// created it, adopt only an identical unnamed entity; never replace remote
-  /// naming, hidden state, or other person metadata.
+  /// Rechecks synced person entities and local cluster mappings immediately
+  /// before creating. Call serially under the ML process lock so a repeated
+  /// local pass finds the existing assignment instead of creating it again.
   Future<PersonEntity?> addUnnamedPersonForClusterIfAbsent(
     String clusterID,
   ) async {
-    final personID = AutoUnnamedPersonService.personEntityID(clusterID);
-    final existing = (await getPersonsMap())[personID];
-    if (existing != null) {
-      return _isSameAutoUnnamedCluster(existing, clusterID) ? existing : null;
-    }
-    try {
-      return await addPerson(
-        name: "",
-        clusterID: clusterID,
-        isUnnamed: true,
-        customID: personID,
-      );
-    } catch (error, stackTrace) {
-      logger.info(
-        "Auto-unnamed person creation raced or failed for cluster $clusterID: $error",
-      );
-      try {
-        await sync();
-        final racedPerson = (await getPersonsMap())[personID];
-        if (racedPerson != null &&
-            _isSameAutoUnnamedCluster(racedPerson, clusterID)) {
-          return racedPerson;
-        }
-      } catch (syncError, syncStackTrace) {
-        logger.warning(
-          "Could not read auto-unnamed person after create failure",
-          syncError,
-          syncStackTrace,
-        );
+    final persons = await getPersons();
+    for (final person in persons) {
+      if (!person.data.assigned.any((cluster) => cluster.id == clusterID)) {
+        continue;
       }
-      Error.throwWithStackTrace(error, stackTrace);
+      if (!person.data.isIgnored &&
+          person.data.isUnnamed &&
+          person.data.name.isEmpty) {
+        return person;
+      }
+      return null;
     }
+    final mappings = await faceMLDataDB.getPersonToClusterIdToFaceIds();
+    if (mappings.values.any((clusters) => clusters.containsKey(clusterID))) {
+      return null;
+    }
+    return addPerson(name: "", clusterID: clusterID, isUnnamed: true);
   }
-
-  bool _isSameAutoUnnamedCluster(PersonEntity person, String clusterID) =>
-      person.data.isUnnamed &&
-      person.data.name.isEmpty &&
-      person.data.assigned.any((cluster) => cluster.id == clusterID);
 
   Future<void> removeClusterToPerson({
     required String personID,
@@ -1046,14 +1019,8 @@ class PersonService {
     EntityType type,
     Map<String, dynamic> jsonMap, {
     String? id,
-    bool addWithCustomID = false,
   }) async {
-    final result = await entityService.addOrUpdate(
-      type,
-      jsonMap,
-      id: id,
-      addWithCustomID: addWithCustomID,
-    );
+    final result = await entityService.addOrUpdate(type, jsonMap, id: id);
     _invalidatePersonCache();
     return result;
   }

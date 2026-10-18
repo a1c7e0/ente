@@ -1,14 +1,20 @@
-import "package:uuid/uuid.dart";
+import "package:photos/models/ml/face/person.dart";
 
 /// Selects existing, unassigned face clusters that qualify for an unnamed
 /// PersonEntity. File IDs are restricted to currently uploaded photos.
 class AutoUnnamedPersonService {
   static const int maxCreationsPerClusteringRun = 10;
-  static const String _personIDNamespace =
-      "de305d54-75b4-431b-adb2-eb6b9e546014";
 
-  static String personEntityID(String clusterID) =>
-      const Uuid().v5(_personIDNamespace, "auto-unnamed:$clusterID");
+  static Set<String> assignedClusterIDs(Iterable<PersonEntity> persons) => {
+    for (final person in persons)
+      for (final cluster in person.data.assigned) cluster.id,
+  };
+
+  static Set<String> assignedFaceIDs(Iterable<PersonEntity> persons) => {
+    for (final person in persons)
+      for (final cluster in person.data.assigned) ...cluster.faces,
+    for (final person in persons) ...person.data.rejectedFaceIDs,
+  };
 
   static List<String> eligibleClusters({
     required int threshold,
