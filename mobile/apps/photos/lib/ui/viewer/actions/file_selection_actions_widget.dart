@@ -35,6 +35,7 @@ import 'package:photos/services/machine_learning/face_ml/feedback/cluster_feedba
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_photo_reset_service.dart";
 import "package:photos/services/machine_learning/ml_process_lock.dart";
+import "package:photos/services/machine_learning/ml_run_control.dart";
 import "package:photos/services/machine_learning/ml_service.dart";
 import "package:photos/theme/colors.dart";
 import "package:photos/theme/ente_theme.dart";
@@ -45,8 +46,8 @@ import "package:photos/ui/common/photo_library_add_permission.dart";
 import 'package:photos/ui/components/action_sheet_widget.dart';
 import "package:photos/ui/components/bottom_action_bar/selection_action_sheet.dart";
 import 'package:photos/ui/components/buttons/button_widget.dart';
-import 'package:photos/ui/components/models/button_type.dart';
 import "package:photos/ui/components/dialog_widget.dart";
+import 'package:photos/ui/components/models/button_type.dart';
 import 'package:photos/ui/notification/toast.dart';
 import "package:photos/ui/tools/collage/collage_creator_page.dart";
 import "package:photos/ui/viewer/actions/suggest_delete_sheet.dart";
@@ -615,11 +616,13 @@ class _FileSelectionActionsWidgetState
       firstButtonOnTap: () async {
         try {
           MLPhotoResetResult? result;
+          MLService.instance.stopActiveRun(MlStopReason.manual);
           final attempt = await MlProcessLock.instance.tryRunExclusive(
             MlOperation.clearData,
             () async {
-              result = await MLPhotoResetService.instance
-                  .resetPersonBindings(files);
+              result = await MLPhotoResetService.instance.resetPersonBindings(
+                files,
+              );
             },
             background: false,
             waitForAvailability: true,
@@ -636,14 +639,14 @@ class _FileSelectionActionsWidgetState
             );
           }
           widget.selectedFiles.clearAll();
-          if (!context.mounted) return;
+          if (!mounted) return;
           showShortToast(
             context,
             "Reset person bindings for ${result!.resetPhotoCount} photo(s)",
           );
         } catch (e, s) {
           _logger.severe("Failed to reset selected ML person bindings", e, s);
-          if (!context.mounted) return;
+          if (!mounted) return;
           await showGenericErrorDialog(context: context, error: e);
         }
       },
@@ -694,6 +697,7 @@ class _FileSelectionActionsWidgetState
         resetPhotoCount = files.length;
       } else {
         MLPhotoResetResult? result;
+        MLService.instance.stopActiveRun(MlStopReason.manual);
         final attempt = await MlProcessLock.instance.tryRunExclusive(
           MlOperation.clearData,
           () async {
@@ -717,7 +721,7 @@ class _FileSelectionActionsWidgetState
       }
 
       widget.selectedFiles.clearAll();
-      if (!context.mounted) return;
+      if (!mounted) return;
       showShortToast(
         context,
         recalculateNow
@@ -726,7 +730,7 @@ class _FileSelectionActionsWidgetState
       );
     } catch (e, s) {
       _logger.severe("Failed to reset selected ML data", e, s);
-      if (!context.mounted) return;
+      if (!mounted) return;
       await showGenericErrorDialog(context: context, error: e);
     }
   }
