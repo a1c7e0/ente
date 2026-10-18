@@ -581,21 +581,12 @@ class PersonService {
       );
       await faceMLDataDB.removePerson(personID);
       justName.data.logStats();
-
-      if (entity.data.email != null) {
-        await refreshPersonCache();
-      }
     } else {
       await entityService.deleteEntry(personID);
       await faceMLDataDB.removePerson(personID);
-
-      if (entity != null) {
-        if (entity.data.email != null) {
-          await refreshPersonCache();
-        }
-      }
     }
 
+    await refreshPersonCache();
     Bus.instance.fire(PeopleChangedEvent());
   }
 
