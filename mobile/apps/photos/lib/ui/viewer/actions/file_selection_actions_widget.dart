@@ -35,6 +35,7 @@ import 'package:photos/services/machine_learning/face_ml/feedback/cluster_feedba
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_photo_reset_service.dart";
 import "package:photos/services/machine_learning/ml_process_lock.dart";
+import "package:photos/services/machine_learning/ml_service.dart";
 import "package:photos/theme/colors.dart";
 import "package:photos/theme/ente_theme.dart";
 import 'package:photos/ui/actions/collection/collection_file_actions.dart';
@@ -45,6 +46,7 @@ import 'package:photos/ui/components/action_sheet_widget.dart';
 import "package:photos/ui/components/bottom_action_bar/selection_action_sheet.dart";
 import 'package:photos/ui/components/buttons/button_widget.dart';
 import 'package:photos/ui/components/models/button_type.dart';
+import "package:photos/ui/components/dialog_widget.dart";
 import 'package:photos/ui/notification/toast.dart';
 import "package:photos/ui/tools/collage/collage_creator_page.dart";
 import "package:photos/ui/viewer/actions/suggest_delete_sheet.dart";
@@ -570,6 +572,14 @@ class _FileSelectionActionsWidgetState
         items.add(
           SelectionSheetAction(
             hugeIcon: HugeIcons.strokeRoundedReload,
+            labelText: "ML reset",
+            shouldShow: allSelectedFilesAreResettable,
+            onTap: () => _resetSelectedMLBindings(resettableFiles),
+          ),
+        );
+        items.add(
+          SelectionSheetAction(
+            hugeIcon: HugeIcons.strokeRoundedReload,
             labelText: "ML full reset",
             shouldShow: allSelectedFilesAreResettable,
             onTap: () => _resetSelectedML(resettableFiles),
@@ -594,13 +604,13 @@ class _FileSelectionActionsWidgetState
     );
   }
 
-  Future<void> _resetSelectedML(List<EnteFile> files) async {
+  Future<void> _resetSelectedMLBindings(List<EnteFile> files) async {
     await showChoiceDialog(
       context,
-      title: "Reset ML data?",
+      title: "Reset ML person bindings?",
       body:
-          "This will remove face, body, and CLIP data and their person/group associations from ${files.length} owned, uploaded photo(s). The original photos and other metadata stay unchanged. ML will not run again automatically.",
-      firstButtonLabel: "Reset ML data",
+          "This clears person associations and body review decisions for ${files.length} selected photo(s). Detection boxes, face/body/CLIP embeddings, and face clusters stay. Face assignments are stored per cluster, so a face cluster containing a selected photo will be unassigned as a whole. Photos and other metadata stay unchanged.",
+      firstButtonLabel: "Reset person bindings",
       isCritical: true,
       firstButtonOnTap: () async {
         try {
@@ -608,7 +618,8 @@ class _FileSelectionActionsWidgetState
           final attempt = await MlProcessLock.instance.tryRunExclusive(
             MlOperation.clearData,
             () async {
-              result = await MLPhotoResetService.instance.reset(files);
+              result = await MLPhotoResetService.instance
+                  .resetPersonBindings(files);
             },
             background: false,
             waitForAvailability: true,
@@ -619,7 +630,7 @@ class _FileSelectionActionsWidgetState
           }
           if (result!.failedFileIDs.isNotEmpty) {
             throw StateError(
-              "Reset ${result!.resetPhotoCount} photo(s); "
+              "Reset bindings for ${result!.resetPhotoCount} photo(s); "
               "${result!.failedFileIDs.length} failed. First failed file ID: "
               "${result!.failedFileIDs.first}. Keep the selection and retry.",
             );
@@ -628,15 +639,96 @@ class _FileSelectionActionsWidgetState
           if (!context.mounted) return;
           showShortToast(
             context,
-            "Reset ML data for ${result!.resetPhotoCount} photo(s)",
+            "Reset person bindings for ${result!.resetPhotoCount} photo(s)",
           );
         } catch (e, s) {
-          _logger.severe("Failed to reset selected ML data", e, s);
+          _logger.severe("Failed to reset selected ML person bindings", e, s);
           if (!context.mounted) return;
           await showGenericErrorDialog(context: context, error: e);
         }
       },
     );
+  }
+
+  Future<void> _resetSelectedML(List<EnteFile> files) async {
+    await showDialogWidget(
+      context: context,
+      title: "Reset ML data?",
+      body:
+          "This removes face, body, and CLIP data and their person/group associations from ${files.length} owned, uploaded photo(s). Choose whether to recalculate now or later. The original photos and other metadata stay unchanged.",
+      buttons: [
+        ButtonWidget(
+          buttonType: ButtonType.critical,
+          labelText: "Re-calculate now",
+          buttonAction: ButtonAction.first,
+          isInAlert: true,
+          onTap: () => _executeSelectedMLReset(files, recalculateNow: true),
+        ),
+        ButtonWidget(
+          buttonType: ButtonType.secondary,
+          labelText: "Re-calculate later",
+          buttonAction: ButtonAction.second,
+          isInAlert: true,
+          onTap: () => _executeSelectedMLReset(files, recalculateNow: false),
+        ),
+        ButtonWidget(
+          buttonType: ButtonType.tertiary,
+          labelText: context.strings.cancel,
+          buttonAction: ButtonAction.third,
+          isInAlert: true,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _executeSelectedMLReset(
+    List<EnteFile> files, {
+    required bool recalculateNow,
+  }) async {
+    try {
+      late final int resetPhotoCount;
+      if (recalculateNow) {
+        if (!await MLService.instance.recalculateFiles(files)) {
+          throw StateError("Could not recalculate ML data for the selection");
+        }
+        resetPhotoCount = files.length;
+      } else {
+        MLPhotoResetResult? result;
+        final attempt = await MlProcessLock.instance.tryRunExclusive(
+          MlOperation.clearData,
+          () async {
+            result = await MLPhotoResetService.instance.reset(files);
+          },
+          background: false,
+          waitForAvailability: true,
+          waitDeadline: const Duration(minutes: 3),
+        );
+        if (attempt != MlLockAttempt.ran) {
+          throw StateError("Could not acquire the ML lock: ${attempt.name}");
+        }
+        if (result!.failedFileIDs.isNotEmpty) {
+          throw StateError(
+            "Reset ${result!.resetPhotoCount} photo(s); "
+            "${result!.failedFileIDs.length} failed. First failed file ID: "
+            "${result!.failedFileIDs.first}. Keep the selection and retry.",
+          );
+        }
+        resetPhotoCount = result!.resetPhotoCount;
+      }
+
+      widget.selectedFiles.clearAll();
+      if (!context.mounted) return;
+      showShortToast(
+        context,
+        recalculateNow
+            ? "Reset and recalculated ML data for $resetPhotoCount photo(s)"
+            : "Reset ML data for $resetPhotoCount photo(s); recalculation is deferred",
+      );
+    } catch (e, s) {
+      _logger.severe("Failed to reset selected ML data", e, s);
+      if (!context.mounted) return;
+      await showGenericErrorDialog(context: context, error: e);
+    }
   }
 
   Future<void> _editLocation() async {

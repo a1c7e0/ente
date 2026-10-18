@@ -616,10 +616,17 @@ class MLService {
 
   /// Recalculates all supported ML indexes for one uploaded photo using the
   /// same persistence path as the regular indexing flow.
-  Future<bool> recalculateFile(EnteFile file) async {
+  Future<bool> recalculateFile(EnteFile file) => recalculateFiles([file]);
+
+  /// Recalculates selected uploaded photos using the existing ML pipeline.
+  Future<bool> recalculateFiles(List<EnteFile> files) async {
+    final byID = <int, EnteFile>{
+      for (final file in files)
+        if (file.isOwner && file.uploadedFileID != null)
+          file.uploadedFileID!: file,
+    };
     if (isLocalGalleryMode ||
-        !file.isOwner ||
-        file.uploadedFileID == null ||
+        byID.isEmpty ||
         !hasGrantedMLConsent ||
         !localSettings.isMLLocalIndexingEnabled) {
       return false;
@@ -627,6 +634,7 @@ class MLService {
 
     final control = MlRunControl();
     var processed = false;
+    var allProcessed = true;
     final attempt = await _runExclusiveWithControl(
       MlOperation.indexing,
       control,
@@ -643,21 +651,46 @@ class MLService {
           return;
         }
 
-        final reset = await MLPhotoResetService.instance.reset([file]);
-        if (reset.resetPhotoCount != 1 || control.stopRequested) return;
+        final reset = await MLPhotoResetService.instance.reset(
+          byID.values.toList(),
+        );
+        if (reset.resetPhotoCount != byID.length || control.stopRequested) {
+          return;
+        }
 
         await MLIndexingIsolate.instance.prepareRustRuntime();
         try {
-          final instruction = FileMLInstruction(
-            file: file,
-            mode: MLMode.enteGallery,
-            shouldRunFaces: true,
-            shouldRunClip: true,
-            shouldRunPets:
-                flagService.petEnabled && localSettings.petRecognitionEnabled,
-            shouldRunBodies: true,
-          );
-          processed = await _processImage(instruction);
+          final selectedFiles = byID.values.toList();
+          for (var start = 0;
+              start < selectedFiles.length;
+              start += fileDownloadMlLimit) {
+            if (control.stopRequested) {
+              allProcessed = false;
+              break;
+            }
+            final end = start + fileDownloadMlLimit < selectedFiles.length
+                ? start + fileDownloadMlLimit
+                : selectedFiles.length;
+            final batch = selectedFiles.sublist(start, end);
+            final outcomes = await Future.wait(
+              batch.map((file) {
+                return _processImage(
+                  FileMLInstruction(
+                    file: file,
+                    mode: MLMode.enteGallery,
+                    shouldRunFaces: true,
+                    shouldRunClip: true,
+                    shouldRunPets:
+                        flagService.petEnabled &&
+                        localSettings.petRecognitionEnabled,
+                    shouldRunBodies: true,
+                  ),
+                );
+              }),
+            );
+            processed = outcomes.any((result) => result) || processed;
+            allProcessed = outcomes.every((result) => result) && allProcessed;
+          }
           if (processed) {
             if (!control.stopRequested &&
                 await _dbForMode(MLMode.enteGallery).getUnclusteredFaceCount() >
@@ -675,8 +708,11 @@ class MLService {
           MLModelDownloadService.instance.invalidateModelDownloadCache();
         }
       },
+      // Manual re-calculation should wait behind an active ML run instead of
+      // being dropped because the shared process lock is busy.
+      lockWait: const Duration(minutes: 10),
     );
-    return attempt == MlLockAttempt.ran && processed;
+    return attempt == MlLockAttempt.ran && processed && allProcessed;
   }
 
   Future<void> _fetchAndIndexAllImages({
