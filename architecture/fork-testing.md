@@ -27,7 +27,7 @@ docker run --rm -p 3000:3000 \
 
 Publish any additional application ports you need. The Web image retains upstream's runtime endpoint substitution.
 
-The integration branch combines profile review, automatic unnamed people, ML Lab, and Locker shared storage. Locker uses `io.ente.locker.dev` and the same persistent fork test signing key. See the [Chinese integration checklist](integration-test-checklist.zh.md) for UI entry points and expected results. Shared Locker quotas require this branch's Server; installing the APK alone does not activate them.
+The integration branch combines profile review, automatic unnamed people, ML Lab, and Locker shared storage. ML controls are reached only by tapping the Machine Learning page title seven times: the existing hidden menu contains the unnamed-person threshold and, in diagnostic builds, an ML Lab tools submenu. There is no separate ML Debug shortcut on the Settings page. Locker uses `io.ente.locker.dev` and the same persistent fork test signing key. See the [Chinese integration checklist](integration-test-checklist.zh.md) for UI entry points and expected results. Shared Locker quotas require this branch's Server; installing the APK alone does not activate them.
 
 ## Workflow triggers and reuse
 

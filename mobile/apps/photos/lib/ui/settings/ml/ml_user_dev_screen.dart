@@ -17,6 +17,7 @@ import "package:photos/ui/components/models/button_type.dart";
 import "package:photos/ui/components/settings/settings_grouped_card.dart";
 import "package:photos/ui/components/toggle_switch_widget.dart";
 import "package:photos/ui/notification/toast.dart";
+import "package:photos/ui/settings/debug/ml_debug_settings_page.dart";
 import "package:photos/utils/dialog_util.dart";
 
 final Logger _logger = Logger("MLUserDeveloperOptions");
@@ -39,12 +40,15 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
 
   late double _autoMergeThreshold;
   late double _defaultClusteringDistance;
+  late int _autoUnnamedPersonPhotoThreshold;
   late bool _persistAutoMergeThreshold;
   late bool _persistDefaultClusteringDistance;
 
   @override
   void initState() {
     super.initState();
+    _autoUnnamedPersonPhotoThreshold =
+        localSettings.autoUnnamedPersonPhotoThreshold;
     final savedAutoMerge = localSettings.autoMergeThresholdOverride;
     _persistAutoMergeThreshold = true;
     _autoMergeThreshold = _clampThreshold(
@@ -192,6 +196,24 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
         widget.mlIsEnabled
             ? _buildThresholdsCard(context)
             : const SizedBox.shrink(),
+        if (widget.mlIsEnabled &&
+            const bool.fromEnvironment("enteMLDiagnostics")) ...[
+          const SizedBox(height: 24),
+          MenuComponent(
+            title: "ML Lab tools",
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const MLDebugSettingsPage()),
+              );
+              if (!mounted) return;
+              setState(() {
+                _autoMergeThreshold = PersonService.autoMergeThreshold;
+                _defaultClusteringDistance =
+                    FaceClusteringService.defaultDistanceThreshold;
+              });
+            },
+          ),
+        ],
         const SizedBox(height: 12),
       ],
     );
@@ -254,7 +276,50 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
           max: _clusteringMax,
           onChanged: _updateDefaultClusteringDistance,
         ),
+        _buildAutoUnnamedThresholdItem(context),
       ],
+    );
+  }
+
+  Widget _buildAutoUnnamedThresholdItem(BuildContext context) {
+    final textTheme = getEnteTextTheme(context);
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("Auto-create unnamed people", style: textTheme.smallBold),
+          const SizedBox(height: 4),
+          Text(
+            "Create an unnamed person for an unassigned face cluster after it appears in this many distinct uploaded photos. Applied on the next normal ML run or manual clustering command. Set to 0 to disable.",
+            style: textTheme.miniMuted,
+          ),
+          Slider(
+            value: _autoUnnamedPersonPhotoThreshold.toDouble(),
+            min: 0,
+            max: 100,
+            divisions: 100,
+            label: _autoUnnamedPersonPhotoThreshold == 0
+                ? "Off"
+                : "$_autoUnnamedPersonPhotoThreshold photos",
+            onChanged: (value) {
+              final threshold = value.round();
+              setState(() => _autoUnnamedPersonPhotoThreshold = threshold);
+              unawaited(
+                localSettings.setAutoUnnamedPersonPhotoThreshold(threshold),
+              );
+            },
+          ),
+          Text(
+            _autoUnnamedPersonPhotoThreshold == 0
+                ? "Current: Off"
+                : "Current: $_autoUnnamedPersonPhotoThreshold photos",
+            style: textTheme.miniMuted,
+          ),
+          const SizedBox(height: 4),
+          Text("Default: 10 photos", style: textTheme.miniMuted),
+        ],
+      ),
     );
   }
 
