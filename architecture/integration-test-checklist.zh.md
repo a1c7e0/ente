@@ -6,7 +6,7 @@
 
 - [ ] 确认安装的是本次集成构建，而不是旧 APK：Photos 的开发包名应为 `io.ente.photos.dev.debug`。测试前后确认登录的是同一测试账号和同一服务器。
 - [ ] 准备已上传且归当前账号所有的照片；至少准备一个有可识别正脸的人物，以及同一人的侧脸/单人照。若测身体分组，另备若干同一人不同日期或衣着的全身照，并有不同人物作对照。测试数据用于观察实际结果，不预设模型一定检测或匹配成功。
-- [ ] 确认 Photos 已登录并开启 Machine Learning consent，完成初始 ML 索引及账号同步。人物建议、未命名人物和身体分组需要账号模式及已上传文件 ID；匿名本地图库不能覆盖这些功能。启用调试 UI：进入 **Settings → Machine Learning**，连续点该页面标题 7 次，在打开的 **ML debug options** 中启用 **Show ML debug options**。设置页不再提供单独的 ML Debug 入口；集成诊断构建的额外工具位于这个隐藏菜单里的 **ML Lab tools**。
+- [ ] 确认 Photos 已登录并开启 Machine Learning consent，完成初始 ML 索引及账号同步。人物建议、未命名人物和身体分组需要账号模式及已上传文件 ID；匿名本地图库不能覆盖这些功能。启用调试 UI：进入 **Settings → Machine Learning**，连续点该页面标题 7 次，在打开的 **ML debug options** 中启用 **Show ML debug options**。七次点击菜单仅保留该开关及自动创建未命名人物的配置；其他工具通过 **Settings → ML Debug** 进入，确认没有独立的 ML Lab tools 入口。
 
 ## P0：安装、普通使用与模型下载
 
@@ -37,9 +37,9 @@
 
 - [ ] **身体检测预览。** 在已打开 **Show ML debug options** 的集成构建中，进入照片详情页打开 **ML detections**。确认已存索引与“有索引但无检测”可区分，脸框绿色、身体框橙色，`*` 标出与脸关联的身体；框和照片缩放一致。分数是检测置信度，不是身份匹配概率。
 - [ ] **Run once (no save)。** 在同一诊断页执行 **Run once (no save)**。确认结果只用于当前预览，不写入或同步检测，不触发分组/Review；若 ML 锁忙，记录提示并在空闲后重试。原始身体框中被脸关联规则排除的框可显示为红色试验框。
-- [ ] **Reset body review and grouping。** 在 **ML debug options → ML Lab tools** 的重置区执行 **Reset body review and grouping**，确认确认页范围计数针对整个已索引、自有且已上传的图库（含隐藏照片），不受当前相册筛选影响。确认 Review 决策、手工分组拆分和拒绝匹配被清除，身体检测及嵌入保留；脸与 CLIP 索引、原照片不变。
+- [ ] **Reset body review and grouping。** 在 **Settings → ML Debug** 的重置区执行 **Reset body review and grouping**，确认确认页范围计数针对整个已索引、自有且已上传的图库（含隐藏照片），不受当前相册筛选影响。确认 Review 决策、手工分组拆分和拒绝匹配被清除，身体检测及嵌入保留；脸与 CLIP 索引、原照片不变。
 - [ ] **Reset body indexes and re-run。** 在另一轮小测试数据上执行 **Reset body indexes and re-run**。确认身体检测和嵌入清除后重新索引；脸与 CLIP 数据、原照片不变。观察进度及单文件失败报告，失败项可重试。仅清除数据而没有显式重置时，不应自行启动全库历史扫描。
-- [ ] **ML detections** 与 **Re-calculate ML Data** 由 **Show ML debug options** 控制，不要求 `enteMLDiagnostics=true`。该参数控制的是隐藏菜单内的 **ML Lab tools**；ML Lab APK 使用独立本地数据库，不能读取 Photos 仅保存在本地的索引，可同步的账号加密元数据仍按正常同步流转。
+- [ ] **ML detections** 与 **Re-calculate ML Data** 由 **Show ML debug options** 控制，不要求 `enteMLDiagnostics=true`。dev APK 使用 `enteDeveloperTools=true` 显示官方 Debug 入口，不会开启内部账号功能；ML Lab APK 使用独立本地数据库，不能读取 Photos 仅保存在本地的索引，可同步的账号加密元数据仍按正常同步流转。
 
 - [ ] **身体建议的缩略图与预取。** 在身体 Review 候选中确认缩略图突出身体框、框外区域变暗，照片方向/裁剪正确。候选加载较慢时，已准备好的下一候选应先显示，不被慢缩略图卡住；切换候选后操作对应当前显示项。
 - [ ] **混合人脸/身体分组及多选拆分。** 准备同一人物既有人工/人脸分配又有身体关联的测试数据。在人物的身体分组图库打开更多菜单 → **Mixed grouping**，确认分析并拆分后，仅身体分组被分区；既有人工分配和人脸分组保留，身体分组不会创建新的人脸身份。再多选该组中的一张或多张照片执行移除/拆分，逐项确认只清理身体操作引入的关联，且原有人脸归属仍在。

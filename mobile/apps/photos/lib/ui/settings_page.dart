@@ -27,6 +27,7 @@ import "package:photos/ui/settings/backup/backup_settings_page.dart";
 import "package:photos/ui/settings/backup/free_space_options.dart";
 import "package:photos/ui/settings/cast/cast_settings_page.dart";
 import "package:photos/ui/settings/debug/debug_settings_page.dart";
+import "package:photos/ui/settings/debug/ml_debug_settings_page.dart";
 import "package:photos/ui/settings/inherited_settings_state.dart";
 import "package:photos/ui/settings/memories_settings_screen.dart";
 import "package:photos/ui/settings/ml/machine_learning_settings_page.dart";
@@ -171,12 +172,22 @@ class _SettingsBody extends StatelessWidget {
             ),
             if (hasLoggedIn &&
                 !isLocalGalleryMode &&
-                (flagService.flags.internalUser || kDebugMode)) ...[
+                (flagService.flags.internalUser ||
+                    kDebugMode ||
+                    const bool.fromEnvironment("enteDeveloperTools"))) ...[
               _buildMenuItem(
                 title: "Debug",
                 icon: HugeIcons.strokeRoundedBug02,
                 onTap: () async {
                   await routeToPage(context, const DebugSettingsPage());
+                },
+              ),
+              const SizedBox(height: 8),
+              _buildMenuItem(
+                title: "ML Debug",
+                icon: HugeIcons.strokeRoundedAiBrain01,
+                onTap: () async {
+                  await routeToPage(context, const MLDebugSettingsPage());
                 },
               ),
               const SizedBox(height: 16),

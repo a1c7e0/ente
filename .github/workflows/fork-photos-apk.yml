@@ -176,7 +176,7 @@ jobs:
 
             - name: Build ${{ matrix.app }} arm64 release APK
               working-directory: mobile/apps/${{ matrix.app }}
-              run: flutter build apk --release --flavor dev --target-platform android-arm64 --split-per-abi --dart-define=cronetHttpNoPlay=true --dart-define=enteMLDiagnostics=$ML_DIAGNOSTICS --build-number=$((1000000 + GITHUB_RUN_NUMBER))
+              run: flutter build apk --release --flavor dev --target-platform android-arm64 --split-per-abi --dart-define=enteDeveloperTools=true --dart-define=cronetHttpNoPlay=true --dart-define=enteMLDiagnostics=$ML_DIAGNOSTICS --build-number=$((1000000 + GITHUB_RUN_NUMBER))
 
             - name: Collect APK
               env:

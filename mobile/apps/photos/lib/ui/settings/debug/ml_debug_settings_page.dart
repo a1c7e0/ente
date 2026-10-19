@@ -450,6 +450,34 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
     ready: state == rust.FillState.filled,
   );
 
+  Future<void> deleteEmptyIndices(BuildContext context) async {
+    try {
+      final Set<int> emptyFileIDs = await mlDataDB.getErroredFileIDs();
+      await mlDataDB.deleteFaceIndexForFiles(emptyFileIDs.toList());
+      await mlDataDB.deleteClipEmbeddings(emptyFileIDs.toList());
+      if (!context.mounted) return;
+      showShortToast(context, "Deleted ${emptyFileIDs.length} entries");
+    } catch (e) {
+      if (!context.mounted) return;
+      // ignore: unawaited_futures
+      showGenericErrorDialog(context: context, error: e);
+    }
+  }
+
+  Future<void> deleteAllLocalML(BuildContext context) async {
+    try {
+      await mlDataDB.dropClustersAndPersonTable(faces: true);
+      await SemanticSearchService.instance.clearIndexes();
+      Bus.instance.fire(PeopleChangedEvent());
+      if (!context.mounted) return;
+      showShortToast(context, "All local ML cleared");
+    } catch (e) {
+      if (!context.mounted) return;
+      // ignore: unawaited_futures
+      showGenericErrorDialog(context: context, error: e);
+    }
+  }
+
   Widget _buildThresholdsCard(BuildContext context) {
     return SettingsGroupedCard(
       children: [
@@ -607,6 +635,26 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
   Widget _buildResetActionsCard(BuildContext context) {
     return SettingsGroupedCard(
       children: [
+        MenuItemWidgetNew(
+          title: "Purge empty indices",
+          leadingIconWidget: _buildIconWidget(
+            context,
+            HugeIcons.strokeRoundedReload,
+          ),
+          trailingIcon: Icons.chevron_right_outlined,
+          trailingIconIsMuted: true,
+          onTap: () => deleteEmptyIndices(context),
+        ),
+        MenuItemWidgetNew(
+          title: "Reset all local ML",
+          leadingIconWidget: _buildIconWidget(
+            context,
+            HugeIcons.strokeRoundedReload,
+          ),
+          trailingIcon: Icons.chevron_right_outlined,
+          trailingIconIsMuted: true,
+          onTap: () => deleteAllLocalML(context),
+        ),
         if (!isLocalGalleryMode)
           MenuItemWidgetNew(
             title: "Reset body review and grouping",
