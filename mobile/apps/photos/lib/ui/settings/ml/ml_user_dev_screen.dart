@@ -3,20 +3,16 @@ import "dart:async";
 import "package:ente_components/ente_components.dart";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
-import "package:photos/core/event_bus.dart";
-import "package:photos/db/ml/base.dart";
-import "package:photos/db/ml/db.dart";
-import "package:photos/events/people_changed_event.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_clustering_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
-import "package:photos/services/machine_learning/semantic_search/semantic_search_service.dart";
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/components/buttons/button_widget.dart";
 import "package:photos/ui/components/models/button_type.dart";
 import "package:photos/ui/components/settings/settings_grouped_card.dart";
 import "package:photos/ui/components/toggle_switch_widget.dart";
-import "package:photos/ui/notification/toast.dart";
+import "package:photos/ui/settings/ml/auto_unnamed_person_threshold_setting.dart";
+import "package:photos/ui/settings/ml/ml_debug_actions.dart";
 import "package:photos/utils/dialog_util.dart";
 
 final Logger _logger = Logger("MLUserDeveloperOptions");
@@ -30,14 +26,12 @@ class MLUserDeveloperOptions extends StatefulWidget {
 }
 
 class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
-  late final IMLDataDB<int> mlDataDB = MLDataDB.instance;
   static const double _autoMergeMin = 0.01;
   static const double _autoMergeMax = 0.35;
   static const double _clusteringMin = 0.10;
   static const double _clusteringMax = 0.35;
   static const double _thresholdStep = 0.01;
 
-  late int _autoUnnamedPersonPhotoThreshold;
   late double _autoMergeThreshold;
   late double _defaultClusteringDistance;
   late bool _persistAutoMergeThreshold;
@@ -46,8 +40,6 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
   @override
   void initState() {
     super.initState();
-    _autoUnnamedPersonPhotoThreshold =
-        localSettings.autoUnnamedPersonPhotoThreshold;
     final savedAutoMerge = localSettings.autoMergeThresholdOverride;
     _persistAutoMergeThreshold = true;
     _autoMergeThreshold = _clampThreshold(
@@ -117,7 +109,7 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
                 buttonType: ButtonType.neutral,
                 labelText: "Purge empty indices",
                 onTap: () async {
-                  await deleteEmptyIndices(context);
+                  await purgeEmptyMLIndices(context);
                 },
               )
             : const SizedBox(),
@@ -127,7 +119,7 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
                 buttonType: ButtonType.neutral,
                 labelText: "Reset all local ML",
                 onTap: () async {
-                  await deleteAllLocalML(context);
+                  await resetAllLocalML(context);
                 },
               )
             : const SizedBox(),
@@ -200,34 +192,6 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
     );
   }
 
-  Future<void> deleteEmptyIndices(BuildContext context) async {
-    try {
-      final Set<int> emptyFileIDs = await mlDataDB.getErroredFileIDs();
-      await mlDataDB.deleteFaceIndexForFiles(emptyFileIDs.toList());
-      await mlDataDB.deleteClipEmbeddings(emptyFileIDs.toList());
-      if (!context.mounted) return;
-      showShortToast(context, "Deleted ${emptyFileIDs.length} entries");
-    } catch (e) {
-      if (!context.mounted) return;
-      // ignore: unawaited_futures
-      showGenericErrorDialog(context: context, error: e);
-    }
-  }
-
-  Future<void> deleteAllLocalML(BuildContext context) async {
-    try {
-      await mlDataDB.dropClustersAndPersonTable(faces: true);
-      await SemanticSearchService.instance.clearIndexes();
-      Bus.instance.fire(PeopleChangedEvent());
-      if (!context.mounted) return;
-      showShortToast(context, "All local ML cleared");
-    } catch (e) {
-      if (!context.mounted) return;
-      // ignore: unawaited_futures
-      showGenericErrorDialog(context: context, error: e);
-    }
-  }
-
   Widget _buildThresholdsCard(BuildContext context) {
     return SettingsGroupedCard(
       children: [
@@ -257,50 +221,8 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
           max: _clusteringMax,
           onChanged: _updateDefaultClusteringDistance,
         ),
-        _buildAutoUnnamedThresholdItem(context),
+        const AutoUnnamedPersonThresholdSetting(),
       ],
-    );
-  }
-
-  Widget _buildAutoUnnamedThresholdItem(BuildContext context) {
-    final textTheme = getEnteTextTheme(context);
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Auto-create unnamed people", style: textTheme.smallBold),
-          const SizedBox(height: 4),
-          Text(
-            "Create an unnamed person for an unassigned face cluster after it appears in this many distinct uploaded photos. Applied on the next normal ML run or manual clustering command. Set to 0 to disable.",
-            style: textTheme.miniMuted,
-          ),
-          Slider(
-            value: _autoUnnamedPersonPhotoThreshold.toDouble(),
-            min: 0,
-            max: 100,
-            divisions: 100,
-            label: _autoUnnamedPersonPhotoThreshold == 0
-                ? "Off"
-                : "$_autoUnnamedPersonPhotoThreshold photos",
-            onChanged: (value) {
-              final threshold = value.round();
-              setState(() => _autoUnnamedPersonPhotoThreshold = threshold);
-              unawaited(
-                localSettings.setAutoUnnamedPersonPhotoThreshold(threshold),
-              );
-            },
-          ),
-          Text(
-            _autoUnnamedPersonPhotoThreshold == 0
-                ? "Current: Off"
-                : "Current: $_autoUnnamedPersonPhotoThreshold photos",
-            style: textTheme.miniMuted,
-          ),
-          const SizedBox(height: 4),
-          Text("Default: 10 photos", style: textTheme.miniMuted),
-        ],
-      ),
     );
   }
 

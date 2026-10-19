@@ -27,3 +27,5 @@ Before either operation, the app gathers body indexes that match uploaded files 
 These controls do not start a historical rescan during ordinary use. Missing body data by itself does not trigger reprocessing; re-indexing happens only after the explicit reset. Grouping and review continue to use the existing face and body data paths and their account-backed requirements. Anonymous local-gallery indexing may store local inference results, but it does not gain person saving, suggestions, grouping, or review extensions.
 
 Web reset controls and the separate Lab Server/Web packages are deferred. Use the regular `main` Server/Web images with the ML Lab APK. Server business logic is unchanged by body recognition. Browser inference is not introduced; use mobile or desktop for native ML processing. Model and detector evaluation details are in [mobile ML diagnostics](ml-diagnostics.md).
+
+The full **Settings → ML Debug** page includes every seven-tap option, plus its additional internal controls and body reset actions. Both entries share the same settings; unnamed-person configuration and purge/local-reset operations reuse the same widget or action implementation.

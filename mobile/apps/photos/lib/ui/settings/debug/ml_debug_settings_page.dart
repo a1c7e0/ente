@@ -32,6 +32,8 @@ import "package:photos/ui/components/settings/settings_grouped_card.dart";
 import "package:photos/ui/components/toggle_switch_widget.dart";
 import "package:photos/ui/notification/toast.dart";
 import "package:photos/ui/settings/debug/memories_debug_page.dart";
+import "package:photos/ui/settings/ml/auto_unnamed_person_threshold_setting.dart";
+import "package:photos/ui/settings/ml/ml_debug_actions.dart";
 import "package:photos/utils/dialog_util.dart";
 import "package:photos/utils/ml_util.dart";
 
@@ -148,6 +150,28 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
   Widget _buildMLControlsCard(BuildContext context) {
     return SettingsGroupedCard(
       children: [
+        MenuItemWidgetNew(
+          title: "Show ML debug options",
+          leadingIconWidget: _buildIconWidget(
+            context,
+            HugeIcons.strokeRoundedBug02,
+          ),
+          trailingWidget: ToggleSwitchWidget(
+            value: () => localSettings.showMLDebugOptions,
+            onChanged: () async {
+              try {
+                await localSettings.setShowMLDebugOptions(
+                  !localSettings.showMLDebugOptions,
+                );
+                if (mounted) setState(() {});
+              } catch (e, s) {
+                logger.warning("ML debug options toggle failed", e, s);
+                if (!context.mounted) return;
+                await showGenericErrorDialog(context: context, error: e);
+              }
+            },
+          ),
+        ),
         MenuItemWidgetNew(
           title: "ML Consent",
           leadingIconWidget: _buildIconWidget(
@@ -479,6 +503,7 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
           max: _clusteringMax,
           onChanged: _updateDefaultClusteringDistance,
         ),
+        const AutoUnnamedPersonThresholdSetting(),
       ],
     );
   }
@@ -607,6 +632,26 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
   Widget _buildResetActionsCard(BuildContext context) {
     return SettingsGroupedCard(
       children: [
+        MenuItemWidgetNew(
+          title: "Purge empty indices",
+          leadingIconWidget: _buildIconWidget(
+            context,
+            HugeIcons.strokeRoundedReload,
+          ),
+          trailingIcon: Icons.chevron_right_outlined,
+          trailingIconIsMuted: true,
+          onTap: () => purgeEmptyMLIndices(context),
+        ),
+        MenuItemWidgetNew(
+          title: "Reset all local ML",
+          leadingIconWidget: _buildIconWidget(
+            context,
+            HugeIcons.strokeRoundedReload,
+          ),
+          trailingIcon: Icons.chevron_right_outlined,
+          trailingIconIsMuted: true,
+          onTap: () => resetAllLocalML(context),
+        ),
         if (!isLocalGalleryMode)
           MenuItemWidgetNew(
             title: "Reset body review and grouping",
