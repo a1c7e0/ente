@@ -474,27 +474,12 @@ export const useCreateItemDialogState = ({
             onClose();
         } catch (error) {
             log.error("Failed to save Locker item", error);
-            setError(
-                await formatLockerMutationError(
-                    error,
-                    "createItem",
-                    userDetails?.quotaMode,
-                ),
-            );
-            setUpgradeCTAType(
-                await lockerUpgradeCTAType(error, userDetails?.quotaMode),
-            );
+            setError(await formatLockerMutationError(error, "createItem"));
+            setUpgradeCTAType(await lockerUpgradeCTAType(error));
         } finally {
             setSaving(false);
         }
-    }, [
-        formData,
-        formType,
-        onClose,
-        onSave,
-        selectedCollectionIDs,
-        userDetails,
-    ]);
+    }, [formData, formType, onClose, onSave, selectedCollectionIDs]);
 
     const handleUpload = useCallback(() => upload(onClose), [upload, onClose]);
 

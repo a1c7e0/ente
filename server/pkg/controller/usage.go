@@ -38,8 +38,6 @@ type LockerLimits struct {
 	StorageLimit int64
 }
 
-// GetLockerLimitsForTier is retained for legacy informational fields only.
-// Locker uploads are governed by shared subscription and family storage.
 func GetLockerLimitsForTier(isPaid bool) LockerLimits {
 	limits := LockerLimits{
 		IsPaid:       isPaid,
@@ -125,6 +123,36 @@ func (c *UsageController) canUploadFile(ctx context.Context, userID int64, size 
 	} else {
 		subStorage = sub.Storage
 	}
+	var lockerUsage *repo.LockerUsage
+	var lUsageErr error
+	if app == ente.Locker {
+		lockerUsage, lUsageErr = c.UsageRepo.GetLockerUsage(ctx, subscriptionUserIDs)
+		if lUsageErr != nil {
+			return stacktrace.Propagate(lUsageErr, "failed to fetch locker usage")
+		}
+
+		isPaidUser := false
+		if err := c.BillingCtrl.HasActiveSelfOrFamilySubscription(subscriptionAdminID, true); err == nil {
+			isPaidUser = true
+		}
+
+		limits := GetLockerLimitsForTier(isPaidUser)
+
+		if lockerUsage.TotalFileCount >= limits.FileLimit {
+			return stacktrace.Propagate(&ente.ErrFileLimitReached, "")
+		}
+
+		projectedLockerUsage := lockerUsage.TotalUsage
+		if size != nil {
+			projectedLockerUsage += *size
+		}
+		if projectedLockerUsage >= limits.StorageLimit {
+			return stacktrace.Propagate(ente.ErrStorageLimitExceeded, "locker storage limit exceeded (limit %d, usage %d)", limits.StorageLimit, projectedLockerUsage)
+		}
+		// Locker uploads should not be blocked by Photos subscription limits.
+		return nil
+	}
+
 	usage, err := c.UsageRepo.GetCombinedUsage(ctx, subscriptionUserIDs)
 	if err != nil {
 		return stacktrace.Propagate(err, "")
@@ -144,7 +172,15 @@ func (c *UsageController) canUploadFile(ctx context.Context, userID int64, size 
 		}
 		var eligibleBonus = bonus.GetUsableBonus(subStorage)
 		if newUsage > (subStorage + eligibleBonus) {
-			return stacktrace.Propagate(ente.ErrStorageLimitExceeded, "subscription Storage Limit Exceeded (limit %d, usage %d, bonus %d) for admin %d", subStorage, usage, eligibleBonus, subscriptionAdminID)
+			if lockerUsage == nil && lUsageErr == nil {
+				lockerUsage, lUsageErr = c.UsageRepo.GetLockerUsage(ctx, subscriptionUserIDs)
+				if lUsageErr != nil {
+					return stacktrace.Propagate(lUsageErr, "failed to fetch locker usage")
+				}
+			}
+			if lockerUsage == nil || (newUsage-lockerUsage.TotalUsage) > (subStorage+eligibleBonus) {
+				return stacktrace.Propagate(ente.ErrStorageLimitExceeded, "subscription Storage Limit Exceeded (limit %d, usage %d, bonus %d) for admin %d", subStorage, usage, eligibleBonus, subscriptionAdminID)
+			}
 		}
 	}
 

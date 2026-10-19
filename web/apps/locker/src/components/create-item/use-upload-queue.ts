@@ -309,13 +309,9 @@ export function useUploadQueue({
                                 await formatLockerMutationError(
                                     error,
                                     "uploadFile",
-                                    effectiveUserDetails?.quotaMode,
                                 );
                             const nextUpgradeCTAType =
-                                await lockerUpgradeCTAType(
-                                    error,
-                                    effectiveUserDetails?.quotaMode,
-                                );
+                                await lockerUpgradeCTAType(error);
                             setError((current) => current ?? formattedError);
                             if (nextUpgradeCTAType) {
                                 setUpgradeCTAType(
@@ -355,19 +351,8 @@ export function useUploadQueue({
                 }
             } catch (error) {
                 log.error("Failed to upload Locker files", error);
-                setError(
-                    await formatLockerMutationError(
-                        error,
-                        "uploadFile",
-                        effectiveUserDetails?.quotaMode,
-                    ),
-                );
-                setUpgradeCTAType(
-                    await lockerUpgradeCTAType(
-                        error,
-                        effectiveUserDetails?.quotaMode,
-                    ),
-                );
+                setError(await formatLockerMutationError(error, "uploadFile"));
+                setUpgradeCTAType(await lockerUpgradeCTAType(error));
             } finally {
                 setUploading(false);
             }

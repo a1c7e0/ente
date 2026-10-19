@@ -80,10 +80,8 @@ export const useLockerUploads = ({
             failure: LockerUploadPreflightFailure,
             projectedFileCount: number,
             projectedUsage: number,
-            quotaMode?: "sharedStorage",
         ) => {
             if (
-                quotaMode !== "sharedStorage" &&
                 (projectedFileCount > LOCKER_FILE_LIMIT_PAID ||
                     projectedUsage > LOCKER_STORAGE_LIMIT_PAID_BYTES) &&
                 (failure.reason === "fileCountLimit" ||
@@ -244,9 +242,6 @@ export const useLockerUploads = ({
                     {
                         remainingFileCount: allowance.remainingFileCount,
                         freeStorage: allowance.freeStorage,
-                        ignoreFileCount:
-                            uploadLimitState.userDetails.quotaMode ===
-                            "sharedStorage",
                     },
                 );
 
@@ -259,7 +254,6 @@ export const useLockerUploads = ({
                                 scanResult.scannedNonEmptyFileCount,
                             uploadLimitState.userDetails.usage +
                                 scanResult.scannedTotalSize,
-                            uploadLimitState.userDetails.quotaMode,
                         ),
                     );
                     return;

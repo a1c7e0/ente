@@ -12,7 +12,6 @@ type UserDetailsResponse struct {
 	FamilyData        *ente.FamilyMemberResponse `json:"familyData,omitempty"`
 	FileCount         *int64                     `json:"fileCount,omitempty"`
 	LockerFamilyUsage *LockerFamilyUsage         `json:"lockerFamilyUsage,omitempty"`
-	LockerQuotaMode   string                     `json:"lockerQuotaMode,omitempty"`
 	// Deprecated field. Client doesn't consume this field. We can completely remove it after Aug 2023
 	SharedCollectionsCount *int64                           `json:"sharedCollectionsCount,omitempty"`
 	StorageBonus           int64                            `json:"storageBonus"`

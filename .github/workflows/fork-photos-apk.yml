@@ -17,7 +17,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                app: ${{ github.ref == 'refs/heads/feat/integration-test' && fromJSON('["photos", "locker"]') || fromJSON('["photos"]') }}
+                app: [photos]
         runs-on: ubuntu-24.04
         timeout-minutes: 90
         env:
@@ -253,8 +253,6 @@ jobs:
                   fi
                   if [ "$APP" = photos ] && [ "$APK_CHANNEL" = integration ]; then
                       app_note="Photos integration uses the ML Lab application ID and can update that installation."
-                  elif [ "$APP" = locker ] && [ "$APK_CHANNEL" = integration ]; then
-                      app_note="Locker integration uses the io.ente.locker.dev application ID."
                   else
                       app_note="Install this APK alongside other Ente apps according to its configured application ID."
                   fi

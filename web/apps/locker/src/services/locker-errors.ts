@@ -16,7 +16,6 @@ const museumErrorCode = async (error: HTTPError) => {
 export const formatLockerMutationError = async (
     error: unknown,
     action: LockerMutationAction,
-    quotaMode?: "sharedStorage",
 ) => {
     if (error instanceof HTTPError) {
         if (error.res.status === 402) {
@@ -31,9 +30,6 @@ export const formatLockerMutationError = async (
 
         const code = await museumErrorCode(error);
         if (error.res.status === 403 && code === "FILE_LIMIT_REACHED") {
-            if (quotaMode === "sharedStorage") {
-                return t("generic_error_retry");
-            }
             return t(
                 action === "uploadFile"
                     ? "uploadFileCountLimitErrorBody"
@@ -51,7 +47,6 @@ export const formatLockerMutationError = async (
 
 export const lockerUpgradeCTAType = async (
     error: unknown,
-    quotaMode?: "sharedStorage",
 ): Promise<LockerUpgradeCTAType | null> => {
     if (!(error instanceof HTTPError)) {
         return null;
@@ -60,8 +55,6 @@ export const lockerUpgradeCTAType = async (
     if (error.res.status === 426) {
         return "storageLimit";
     }
-
-    if (quotaMode === "sharedStorage") return null;
 
     const code = await museumErrorCode(error);
     return error.res.status === 403 && code === "FILE_LIMIT_REACHED"
