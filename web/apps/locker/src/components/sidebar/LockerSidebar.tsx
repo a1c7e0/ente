@@ -64,9 +64,11 @@ interface LockerSidebarProps {
     isTrashView: boolean;
     isCollectionsView: boolean;
     userDetails?: {
+        quotaMode?: "sharedStorage";
         email: string;
         usage: number;
         storageLimit: number;
+        userStorage?: number;
         fileCount: number;
         lockerFileLimit: number;
         isPartOfFamily: boolean;
@@ -114,20 +116,39 @@ export const LockerSidebar: React.FC<LockerSidebarProps> = ({
     const maxFileCount = userDetails
         ? Math.max(userDetails.lockerFileLimit, 1)
         : 1;
+    const isSharedStorage = userDetails?.quotaMode === "sharedStorage";
+    const displayedUsage = isSharedStorage
+        ? (userDetails?.usage ?? 0)
+        : (userDetails?.fileCount ?? 0);
+    const displayedLimit = isSharedStorage
+        ? (userDetails?.storageLimit ?? 0)
+        : maxFileCount;
+    const userUsage = isSharedStorage
+        ? (userDetails?.userStorage ?? displayedUsage)
+        : (userDetails?.fileCount ?? 0);
     const userProgress = userDetails
-        ? Math.min(userDetails.fileCount / maxFileCount, 1)
+        ? Math.min(userUsage / Math.max(displayedLimit, 1), 1)
         : 0;
     const showFamilyBreakup =
         !!userDetails &&
         userDetails.isPartOfFamily &&
-        typeof userDetails.lockerFamilyFileCount === "number";
+        (isSharedStorage ||
+            typeof userDetails.lockerFamilyFileCount === "number");
     const familyProgress = showFamilyBreakup
-        ? Math.min((userDetails.lockerFamilyFileCount ?? 0) / maxFileCount, 1)
+        ? Math.min(
+              (isSharedStorage
+                  ? displayedUsage
+                  : (userDetails.lockerFamilyFileCount ?? 0)) /
+                  Math.max(displayedLimit, 1),
+              1,
+          )
         : 0;
-    const formattedUsed = new Intl.NumberFormat().format(
-        userDetails?.fileCount ?? 0,
-    );
-    const formattedMax = new Intl.NumberFormat().format(maxFileCount);
+    const formattedUsed = isSharedStorage
+        ? formatBytes(displayedUsage)
+        : new Intl.NumberFormat().format(displayedUsage);
+    const formattedMax = isSharedStorage
+        ? formatBytes(displayedLimit)
+        : new Intl.NumberFormat().format(displayedLimit);
 
     useEffect(() => {
         if (!open) {
@@ -165,7 +186,11 @@ export const LockerSidebar: React.FC<LockerSidebarProps> = ({
                         {userDetails && (
                             <Box sx={usageCardSx}>
                                 <Typography sx={[largeSx, usageMutedSx]}>
-                                    {t("itemsStored")}
+                                    {t(
+                                        isSharedStorage
+                                            ? "usage"
+                                            : "itemsStored",
+                                    )}
                                 </Typography>
                                 <Typography sx={{ ...h1Sx, mt: 0.5 }}>
                                     {formattedUsed}
@@ -344,4 +369,13 @@ export const LockerSidebar: React.FC<LockerSidebarProps> = ({
             />
         </>
     );
+};
+
+const formatBytes = (bytes: number) => {
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const index = Math.min(
+        Math.floor(Math.log(Math.max(bytes, 1)) / Math.log(1024)),
+        units.length - 1,
+    );
+    return `${Number((bytes / 1024 ** index).toFixed(1))} ${units[index]}`;
 };

@@ -522,6 +522,9 @@ class FileUploader {
       if (userDetails == null) {
         return;
       }
+      if (userDetails.usesSharedStorageForLocker) {
+        return;
+      }
       final maxFileCount = _effectiveLockerFileLimit(userDetails);
       final currentFileCount =
           userDetails.isPartOfFamily() && userDetails.lockerFamilyUsage != null

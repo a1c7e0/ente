@@ -67,6 +67,7 @@ const droppedUploadCandidateKey = (file: File, relativePath?: string) =>
 interface DropUploadScanOptions {
     remainingFileCount: number;
     freeStorage: number;
+    ignoreFileCount?: boolean;
 }
 
 interface DropUploadScanResult {
@@ -110,7 +111,10 @@ export const collectUploadCandidatesFromDrop = async (
         }
 
         scannedNonEmptyFileCount += 1;
-        if (scannedNonEmptyFileCount > options.remainingFileCount) {
+        if (
+            !options.ignoreFileCount &&
+            scannedNonEmptyFileCount > options.remainingFileCount
+        ) {
             return { reason: "fileCountLimit" };
         }
 

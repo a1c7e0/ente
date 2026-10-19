@@ -1,5 +1,7 @@
 This fork adds client-side OSNet-AIN x1.0 body recognition to mobile and desktop Photos, with body grouping and review integrated into the existing people workflow. ML Lab diagnostics and reset tools are developed on `feat/ml-lab`. For more details, see [fork testing and builds](architecture/fork-testing.md) and the [ML Lab guide](architecture/ml-lab.md).
 
+The experimental `feat/locker-shared-storage` branch lets Locker share the Photos storage quota instead of enforcing an item-count quota. See the [shared storage guide](architecture/locker-shared-storage.md).
+
 -----
 
 <div align="center">
