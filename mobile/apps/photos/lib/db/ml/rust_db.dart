@@ -210,8 +210,11 @@ class RustMLDataDB implements IMLDataDB<int> {
       (await store).clusterIdToFaceCount();
 
   @override
-  Future<Set<String>> getBadFaceSingletonClusterIDs() async =>
-      (await store).getBadFaceSingletonClusterIds();
+  Future<Set<String>> getBadFaceSingletonClusterIDs({
+    bool includeSideways = true,
+  }) async => (await store).getBadFaceSingletonClusterIds(
+    includeSideways: includeSideways,
+  );
 
   @override
   Future<Set<String>> getClustersWithThreeOrMoreNotPersonFeedback() async =>

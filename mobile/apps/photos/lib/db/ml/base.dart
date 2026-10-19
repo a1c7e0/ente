@@ -16,7 +16,10 @@ abstract class IMLDataDB<T> {
   Future<Map<int, int>> faceIndexedFileIds({int minimumMlVersion});
   Future<int> getFaceIndexedFileCount({int minimumMlVersion});
   Future<Map<String, int>> clusterIdToFaceCount();
-  Future<Set<String>> getBadFaceSingletonClusterIDs();
+  /// Set [includeSideways] to false for the quality-only profile review guard.
+  Future<Set<String>> getBadFaceSingletonClusterIDs({
+    bool includeSideways = true,
+  });
   Future<Set<String>> getClustersWithThreeOrMoreNotPersonFeedback();
   Future<Set<String>> getPersonIgnoredClusters(String personID);
   Future<Map<String, Set<String>>> getPersonToRejectedSuggestions();

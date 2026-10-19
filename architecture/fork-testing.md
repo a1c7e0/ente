@@ -8,10 +8,11 @@
 | --- | --- | --- | --- |
 | `main` | `server` | `web` | `photos-main-test` |
 | `feat/ml-lab` | Uses main's Server | Uses main's Web | `photos-ml-lab-test` |
+| `feat/face-profile-review` | Uses main's Server | Uses main's Web | `photos-face-profile-review-test` |
 
 Image names use the `ghcr.io/a1c7e0/` prefix. Pull `:latest` for the current successful main build or use a commit-SHA tag for a fixed version. Workflow runs publish artifacts; they do not deploy to a running installation.
 
-The dedicated fork Photos APK workflow runs only by manual dispatch, with either branch selected. Pushes do not trigger APK builds. It uploads branch-specific artifacts and refreshes the `photos-main-test` or `photos-ml-lab-test` prerelease. The ML Lab APK uses `io.ente.photos.dev.debug`; the main test APK uses `io.ente.photos.dev`. To install successive builds as updates, configure the repository Actions secrets `PHOTOS_TEST_KEYSTORE_BASE64`, `PHOTOS_TEST_KEYSTORE_PASSWORD`, `PHOTOS_TEST_KEY_PASSWORD`, and `PHOTOS_TEST_KEY_ALIAS` for one persistent test keystore. Until those secrets are present, a manual run warns and uses a temporary signature. Main and ML Lab have different application IDs. The upstream Photos build workflow is separate and should be disabled in this fork's Actions settings to avoid duplicate nightly/release runs. A workflow run builds and publishes artifacts; installing an APK or replacing a container is a separate operator action.
+The dedicated fork Photos APK workflow runs only by manual dispatch, with `main`, `feat/ml-lab`, or `feat/face-profile-review` selected. Pushes do not trigger APK builds. It uploads branch-specific artifacts and refreshes that branch's test prerelease. The ML Lab APK uses `io.ente.photos.dev.debug`; the main and profile-review test APKs use `io.ente.photos.dev`. To install successive builds as updates, configure the repository Actions secrets `PHOTOS_TEST_KEYSTORE_BASE64`, `PHOTOS_TEST_KEYSTORE_PASSWORD`, `PHOTOS_TEST_KEY_PASSWORD`, and `PHOTOS_TEST_KEY_ALIAS` for one persistent test keystore. Until those secrets are present, a manual run warns and uses a temporary signature. Main and ML Lab have different application IDs; profile-review shares the main test application ID. The upstream Photos build workflow is separate and should be disabled in this fork's Actions settings to avoid duplicate nightly/release runs. A workflow run builds and publishes artifacts; installing an APK or replacing a container is a separate operator action.
 
 The supplied persistent test keystore uses alias `ente-photos-test`, also the workflow default. Set `PHOTOS_TEST_KEY_ALIAS` explicitly when using a different keystore alias. The workflow validates the keystore password and alias immediately after JDK setup, before generating bindings or compiling the APK.
 
@@ -48,3 +49,23 @@ Run body inference from mobile or desktop. Photos Web retains upstream's desktop
 The diagnostic APK uses a separate application ID and local database; it cannot read local-only ML data from another installed app. Account-backed metadata arrives through normal encrypted sync. Anonymous local-gallery indexing can run inference and save local-gallery indexes, but grouping, crops, and review still use uploaded file IDs and the account ML database. Named people and person suggestions retain upstream account requirements. Do not extend anonymous mode with save or review operations.
 
 For ML Lab diagnostics and reset behavior, including reset scope and confirmation text, see [ML Lab](ml-lab.md). For detector evaluation details, see [mobile ML diagnostics](ml-diagnostics.md).
+
+## Profile-face review experiment
+
+The `feat/face-profile-review` branch adds high-quality pose-only singleton faces directly to Ente's existing manual review suggestions. A candidate must pass the existing blur/score rules, have detection score strictly above 0.8, match a person's cached reference centroid within 0.65 cosine distance, and be at least 0.15 closer than every other person's reference clusters. It is shown for human review without waiting for the usual review mean/median thresholds; accepting or rejecting it still uses Ente's existing review actions. Per-person rejection and same-photo conflicts still suppress a candidate. The per-person page can show all qualifying groups; the global review route keeps its existing sampled-person limit and adds at most one qualifying side-face group per selected person.
+
+Automatic clustering distances (0.24/0.16), face models, embeddings, encrypted metadata, and review operations remain unchanged. Missing, stale, or invalid reference summaries suppress the extra candidates; no historical rescan is started. Desktop review retains its existing behavior.
+
+The cached-centroid policy was checked on held-out CFP profiles using five ordering seeds. Requiring a 0.15 person-distance gap yielded 25–27 correct side-singleton matches per seed and no wrong matches in this small cohort. Candidates then enter manual review directly, so these counts do not measure user decisions or real-library accuracy. Raw tightly cropped CFP profiles rarely passed detection; real-device validation remains necessary.
+
+Run the focused mobile tests from `mobile/apps/photos`:
+
+```sh
+flutter test --no-pub test/services/machine_learning/profile_review_test.dart test/db/ml_profile_review_test.dart
+```
+
+Run the Rust database guard test from `rust`:
+
+```sh
+cargo test --locked -p ente-photos --lib profile_review_keeps_quality_and_singleton_guards
+```
