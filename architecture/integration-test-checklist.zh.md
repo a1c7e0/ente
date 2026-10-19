@@ -6,7 +6,7 @@
 
 - [ ] 确认安装的是本次集成构建，而不是旧 APK：Photos 的开发包名应为 `io.ente.photos.dev.debug`。测试前后确认登录的是同一测试账号和同一服务器。
 - [ ] 准备已上传且归当前账号所有的照片；至少准备一个有可识别正脸的人物，以及同一人的侧脸/单人照。若测身体分组，另备若干同一人不同日期或衣着的全身照，并有不同人物作对照。测试数据用于观察实际结果，不预设模型一定检测或匹配成功。
-- [ ] 确认 Photos 已登录并开启 Machine Learning consent，完成初始 ML 索引及账号同步。人物建议、未命名人物和身体分组需要账号模式及已上传文件 ID；匿名本地图库不能覆盖这些功能。启用调试 UI：进入 **Settings → Machine Learning**，连续点该页面标题 7 次，在打开的 **ML debug options** 中启用 **Show ML debug options**。七次点击菜单仅保留该开关及自动创建未命名人物的配置；其他工具通过 **Settings → ML Debug** 进入，确认没有独立的 ML Lab tools 入口。
+- [ ] 确认 Photos 已登录并开启 Machine Learning consent，完成初始 ML 索引及账号同步。人物建议、未命名人物和身体分组需要账号模式及已上传文件 ID；匿名本地图库不能覆盖这些功能。启用调试 UI：进入 **Settings → Machine Learning**，连续点该页面标题 7 次，在打开的 **ML debug options** 中启用 **Show ML debug options**。七次点击菜单保留 main 原有的清理空索引、重置本地 ML、远端拉取、交互运行和聚类阈值，并增加自动创建未命名人物配置；完整调试工具和身体专项重置通过 **Settings → ML Debug** 进入，确认没有独立的 ML Lab tools 入口。
 
 ## P0：安装、普通使用与模型下载
 
