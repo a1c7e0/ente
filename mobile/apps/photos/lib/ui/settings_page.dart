@@ -172,15 +172,19 @@ class _SettingsBody extends StatelessWidget {
             ),
             if (hasLoggedIn &&
                 !isLocalGalleryMode &&
-                (flagService.flags.internalUser || kDebugMode)) ...[
-              _buildMenuItem(
-                title: "Debug",
-                icon: HugeIcons.strokeRoundedBug02,
-                onTap: () async {
-                  await routeToPage(context, const DebugSettingsPage());
-                },
-              ),
-              const SizedBox(height: 8),
+                (flagService.flags.internalUser ||
+                    kDebugMode ||
+                    const bool.fromEnvironment("enteMLDiagnostics"))) ...[
+              if (flagService.flags.internalUser || kDebugMode)
+                _buildMenuItem(
+                  title: "Debug",
+                  icon: HugeIcons.strokeRoundedBug02,
+                  onTap: () async {
+                    await routeToPage(context, const DebugSettingsPage());
+                  },
+                ),
+              if (flagService.flags.internalUser || kDebugMode)
+                const SizedBox(height: 8),
               _buildMenuItem(
                 title: "ML Debug",
                 icon: HugeIcons.strokeRoundedAiBrain01,

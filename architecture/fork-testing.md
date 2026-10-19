@@ -4,15 +4,16 @@
 
 `main` is the stable personal integration branch. Its Server and full Web images publish as `ghcr.io/a1c7e0/server` and `ghcr.io/a1c7e0/web`. ML Lab diagnostics and mobile reset controls live on `feat/ml-lab`. Separate `server-ml-lab`/`web-ml-lab` packages and Web reset controls are deferred; Lab APKs use the same Server as regular clients. Container publishing is restricted to `main`, including manual dispatch.
 
-| Branch | Server package | Full Web package | Photos APK release |
+| Branch | Server package | Full Web package | APK release |
 | --- | --- | --- | --- |
 | `main` | `server` | `web` | `photos-main-test` |
 | `feat/ml-lab` | Uses main's Server | Uses main's Web | `photos-ml-lab-test` |
 | `feat/face-profile-review` | Uses main's Server | Uses main's Web | `photos-face-profile-review-test` |
+| `feat/integration-test` | Build this branch for Locker shared quotas | No automatic publication | `photos-integration-test`, `locker-integration-test` |
 
 Image names use the `ghcr.io/a1c7e0/` prefix. Pull `:latest` for the current successful main build or use a commit-SHA tag for a fixed version. Workflow runs publish artifacts; they do not deploy to a running installation.
 
-The dedicated fork Photos APK workflow runs only by manual dispatch, with `main`, `feat/ml-lab`, or `feat/face-profile-review` selected. Pushes do not trigger APK builds. It uploads branch-specific artifacts and refreshes that branch's test prerelease. The ML Lab APK uses `io.ente.photos.dev.debug`; the main and profile-review test APKs use `io.ente.photos.dev`. To install successive builds as updates, configure the repository Actions secrets `PHOTOS_TEST_KEYSTORE_BASE64`, `PHOTOS_TEST_KEYSTORE_PASSWORD`, `PHOTOS_TEST_KEY_PASSWORD`, and `PHOTOS_TEST_KEY_ALIAS` for one persistent test keystore. Until those secrets are present, a manual run warns and uses a temporary signature. Main and ML Lab have different application IDs; profile-review shares the main test application ID. The upstream Photos build workflow is separate and should be disabled in this fork's Actions settings to avoid duplicate nightly/release runs. A workflow run builds and publishes artifacts; installing an APK or replacing a container is a separate operator action.
+The dedicated fork Photos APK workflow runs only by manual dispatch, with `main`, `feat/ml-lab`, `feat/face-profile-review`, or `feat/integration-test` selected. Integration dispatch builds both Photos and Locker for arm64; the other branches build Photos only. Pushes do not trigger APK builds. It uploads branch-specific artifacts and refreshes that branch's test prerelease. The ML Lab and Photos integration APKs use `io.ente.photos.dev.debug`; the main and profile-review test APKs use `io.ente.photos.dev`. To install successive builds as updates, configure the repository Actions secrets `PHOTOS_TEST_KEYSTORE_BASE64`, `PHOTOS_TEST_KEYSTORE_PASSWORD`, `PHOTOS_TEST_KEY_PASSWORD`, and `PHOTOS_TEST_KEY_ALIAS` for one persistent test keystore. Until those secrets are present, a manual run warns and uses a temporary signature. Main and ML Lab have different application IDs; profile-review shares the main test application ID. The upstream Photos build workflow is separate and should be disabled in this fork's Actions settings to avoid duplicate nightly/release runs. A workflow run builds and publishes artifacts; installing an APK or replacing a container is a separate operator action.
 
 The supplied persistent test keystore uses alias `ente-photos-test`, also the workflow default. Set `PHOTOS_TEST_KEY_ALIAS` explicitly when using a different keystore alias. The workflow validates the keystore password and alias immediately after JDK setup, before generating bindings or compiling the APK.
 
@@ -26,15 +27,17 @@ docker run --rm -p 3000:3000 \
 
 Publish any additional application ports you need. The Web image retains upstream's runtime endpoint substitution.
 
+The integration branch combines profile review, automatic unnamed people, ML Lab, and Locker shared storage. Locker uses `io.ente.locker.dev` and the same persistent fork test signing key. See the [Chinese integration checklist](integration-test-checklist.zh.md) for UI entry points and expected results. Shared Locker quotas require this branch's Server; installing the APK alone does not activate them.
+
 ## Workflow triggers and reuse
 
 - Server watches `server/**`, its publishing YAML, and the shared container workflow.
 - Web watches `web/**`, `rust/**`, `.dockerignore`, its publishing YAML, and the shared container workflow. Rust is a shared build input for WebAssembly.
 - APK builds are manual-only because native builds are slow; they do not watch pushes or schedules.
 
-Container workflows filter pushes to `main`; documentation-only commits do not trigger builds. APK dispatch uses the selected branch, `main` or `feat/ml-lab`; container dispatch is restricted to main. Check the workflow's `paths` for the authoritative list.
+Container workflows filter pushes to `main`; documentation-only commits do not trigger builds. APK dispatch uses the selected supported test branch; container dispatch is restricted to main. Check the workflow's `paths` for the authoritative list.
 
-The upstream `server-publish-ghcr.yml` and `web-publish-ghcr.yml` remain the entry points. Their fork job calls `fork-publish-container.yml`, a reusable workflow added by this fork. It builds natively on amd64 and arm64, checks the images, then publishes their combined manifest. Fork jobs skip upstream schedules and official production-commit lookup. The upstream `photos-build.yml` is preserved unchanged but disabled in this fork; `fork-photos-apk.yml` builds the fork's two APK channels. GitHub Actions is the execution platform, a workflow is a YAML process, and an Action such as `actions/checkout` is one reusable step within that process.
+The upstream `server-publish-ghcr.yml` and `web-publish-ghcr.yml` remain the entry points. Their fork job calls `fork-publish-container.yml`, a reusable workflow added by this fork. It builds natively on amd64 and arm64, checks the images, then publishes their combined manifest. Fork jobs skip upstream schedules and official production-commit lookup. The upstream `photos-build.yml` is preserved unchanged but disabled in this fork; `fork-photos-apk.yml` builds the fork's supported test APK channels. GitHub Actions is the execution platform, a workflow is a YAML process, and an Action such as `actions/checkout` is one reusable step within that process.
 
 Container builds use GitHub Actions BuildKit layer caches separated by package and architecture. Cache eviction and cold first builds are possible. Manual APK builds reuse the Flutter SDK, Dart package downloads, Gradle dependency/build caches, Cargo downloads, and compiled Rust outputs (both host code generation/tests and Cargokit Android arm64 builds). Rust output caches are separated by APK channel and keyed by runner image, compiler version, build configuration, dependency manifests/lockfiles, and commit. Compatible earlier commits can be restored; the existing upstream helper restores timestamps only for unchanged Rust source content. Rust incremental artifacts and host debug symbols are disabled to limit cache size. Signing keys and the collected APK artifact directory are excluded from the explicit cache paths. The first build fills these caches; toolchain changes or cache eviction can still cause a cold build, and speedup depends on the changed code. Publishing a new package does not automatically update a deployment.
 

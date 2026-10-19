@@ -2,6 +2,8 @@ This fork adds client-side OSNet-AIN x1.0 body recognition to mobile and desktop
 
 The experimental `feat/locker-shared-storage` branch lets Locker share the Photos storage quota instead of enforcing an item-count quota. See the [shared storage guide](architecture/locker-shared-storage.md).
 
+Combined Photos and Locker test APKs are built from `feat/integration-test`. See the [integration test checklist](architecture/integration-test-checklist.zh.md).
+
 -----
 
 <div align="center">

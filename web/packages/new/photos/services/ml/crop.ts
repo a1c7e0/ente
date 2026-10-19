@@ -4,6 +4,43 @@ import { fetchRenderableEnteFileBlob } from "./blob";
 import type { Box, FaceIndex } from "./face";
 import { clamp } from "./math";
 
+const inFlightBodyCropBlobs = new Map<string, Promise<Blob>>();
+
+/** Return a cached body crop, generating and caching it once per body ID. */
+export const bodyCropBlob = async (
+    bodyID: string,
+    file: EnteFile,
+    box: Box,
+): Promise<Blob> => {
+    const cache = await blobCache("face-crops");
+    const cached = await cache.get(bodyID);
+    if (cached) return cached;
+
+    let inFlight = inFlightBodyCropBlobs.get(bodyID);
+    if (!inFlight) {
+        inFlight = (async () => {
+            const bitmap = await createImageBitmap(
+                await fetchRenderableEnteFileBlob(file),
+            );
+            try {
+                const crop = await extractFaceCrop(bitmap, box);
+                await cache.put(bodyID, crop);
+                return crop;
+            } finally {
+                bitmap.close();
+            }
+        })();
+        inFlightBodyCropBlobs.set(bodyID, inFlight);
+    }
+
+    try {
+        return await inFlight;
+    } finally {
+        if (inFlightBodyCropBlobs.get(bodyID) === inFlight)
+            inFlightBodyCropBlobs.delete(bodyID);
+    }
+};
+
 // Face crops are local-only and must be regenerated on other clients.
 export const regenerateFaceCrops = async (
     file: EnteFile,

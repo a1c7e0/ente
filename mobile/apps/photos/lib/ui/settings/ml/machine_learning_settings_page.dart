@@ -334,29 +334,26 @@ class _ModelLoadingStateState extends State<ModelLoadingState> {
 
   @override
   void initState() {
+    super.initState();
+    for (final entry
+        in MLModelDownloadService.instance.downloadProgress.entries) {
+      _recordProgress(entry.key, entry.value.$1, entry.value.$2);
+    }
     _progressStream = MLModelDownloadService.instance.progressStream.listen((
       event,
     ) {
-      final String model = event.$1;
-      String title = "";
-      if (model == "clip-image") {
-        title = "Image Model";
-      } else if (model == "clip-text") {
-        title = "Text Model";
-      } else if (model == "face-detection") {
-        title = "Face Detection Model";
-      } else if (model == "face-embedding") {
-        title = "Face Embedding Model";
-      }
-      if (title.isNotEmpty) {
-        _progressMap[title] = (event.$2, event.$3);
-        setState(() {});
-      }
+      _recordProgress(event.$1, event.$2, event.$3);
+      setState(() {});
     });
     _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
       setState(() {});
     });
-    super.initState();
+  }
+
+  void _recordProgress(String model, int downloaded, int total) {
+    // Human and pet body detection share one downloaded model asset.
+    final key = model == "pet-body-detection" ? "body-detection" : model;
+    _progressMap[key] = (downloaded, total);
   }
 
   @override
@@ -409,21 +406,61 @@ class _ModelLoadingStateState extends State<ModelLoadingState> {
         ..._progressMap.entries.map((entry) {
           return Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: MenuComponent(
-              key: ValueKey(entry.value),
-              title: entry.key,
-              leading: const HugeIcon(
-                icon: HugeIcons.strokeRoundedCloudDownload,
-                size: IconSizes.small,
-              ),
-              trailing: Text(
-                '${(entry.value.$1 * 100) ~/ entry.value.$2}%',
-                style: TextStyles.mini.copyWith(color: colors.textLight),
-              ),
+            child: ModelDownloadProgressRow(
+              key: ValueKey(entry.key),
+              model: entry.key,
+              downloaded: entry.value.$1,
+              total: entry.value.$2,
             ),
           );
         }),
       ],
+    );
+  }
+}
+
+class ModelDownloadProgressRow extends StatelessWidget {
+  final String model;
+  final int downloaded;
+  final int total;
+
+  const ModelDownloadProgressRow({
+    required this.model,
+    required this.downloaded,
+    required this.total,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.componentColors;
+    final title = switch (model) {
+      "clip-image" => "Image Model",
+      "clip-text" => "Text Model",
+      "face-detection" => "Face Detection Model",
+      "face-embedding" => "Face Embedding Model",
+      "body-detection" ||
+      "pet-body-detection" => "Person & Pet Detection Model",
+      "body-embedding" => "Body Embedding Model",
+      "pet-face-detection" => "Pet Face Detection Model",
+      "pet-face-embedding-dog" => "Dog Face Embedding Model",
+      "pet-face-embedding-cat" => "Cat Face Embedding Model",
+      "pet-body-embedding-dog" => "Dog Body Embedding Model",
+      "pet-body-embedding-cat" => "Cat Body Embedding Model",
+      _ => model,
+    };
+    return MenuComponent(
+      title: title,
+      leading: const HugeIcon(
+        icon: HugeIcons.strokeRoundedCloudDownload,
+        size: IconSizes.small,
+      ),
+      trailing: total <= 0
+          ? EnteLoadingWidget(size: 12, color: colors.fillDark)
+          : Text(
+              '${(downloaded * 100 ~/ total).clamp(0, 100)}%',
+              style: TextStyles.mini.copyWith(color: colors.textLight),
+            ),
     );
   }
 }

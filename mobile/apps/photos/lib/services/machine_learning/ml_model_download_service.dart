@@ -18,6 +18,10 @@ class MLModelDownloadService {
   final _progressController = StreamController<(String, int, int)>.broadcast();
 
   Stream<(String, int, int)> get progressStream => _progressController.stream;
+  final Map<String, (int, int)> _downloadProgress = {};
+
+  Map<String, (int, int)> get downloadProgress =>
+      Map.unmodifiable(_downloadProgress);
 
   Future<String> getAssetsDirectory() async =>
       p.join((await getApplicationSupportDirectory()).path, "assets");
@@ -119,6 +123,10 @@ class MLModelDownloadService {
         )) {
           switch (update) {
             case rust_ml.ModelDownloadEvent_Progress():
+              _downloadProgress[update.model] = (
+                update.downloadedBytes.toInt(),
+                update.totalBytes?.toInt() ?? 0,
+              );
               _progressController.add((
                 update.model,
                 update.downloadedBytes.toInt(),

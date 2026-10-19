@@ -304,6 +304,7 @@ class _PersonFaceWidgetState extends State<PersonFaceWidget>
         return (await BodyRecognitionService.instance.crop(
           file,
           widget.clusterID!,
+          useFullFile: useFullFile,
         ))[file.uploadedFileID];
       }
       String? fixedFaceID;

@@ -90,7 +90,7 @@ guarantees than the underlying protocol.
 Mobile appends migration 17 to both Dart and Rust SQLite schemas, adding
 `body_index(file_id, data, ml_version)` to the existing ML databases, including
 the separate local-gallery database. Its JSON contains the body subtype and
-review decisions. Desktop upgrades the existing `ml` IndexedDB to version 3,
+review decisions. Desktop upgrades the existing `ml` IndexedDB to version 2,
 adding a `body-index` store. Face/CLIP records are not rebuilt by this migration.
 
 Body completion is recorded independently of face/CLIP completion, but does not
@@ -114,10 +114,18 @@ pruned through file-data deletion and existing cleanup paths.
 ## Matching
 
 Body samples are anchored to face identities through geometric face containment.
-Only face-backed samples supply identity evidence. Unknown face clusters still
-compete in the ambiguity calculation, but are not promoted into named people by
-the body layer. Body-derived attachments do not seed face clustering or become
-new body anchors.
+Only face-backed samples supply identity evidence. Unknown face clusters compete
+in the ambiguity calculation and receive high-confidence body photos in their
+existing galleries and photo counts. Their face-based visibility thresholds and
+naming/ignore operations are unchanged; the body layer does not create person
+entities. Body-derived attachments do not seed face clustering or become new
+body anchors.
+
+Mobile local-gallery mode retains body detection, embedding generation and local
+index storage. Body identity matching, body additions to unnamed galleries and
+body identity tags are limited to account mode, using uploaded file IDs and the
+account ML database. The upstream local face-gallery flow is unchanged. No
+historical body-only rescan is scheduled.
 
 The initial attachment gates are cosine similarity ≥0.74, best-minus-runner-up
 margin ≥0.05, capture-time difference ≤3 hours and one person per photo. Review
@@ -132,33 +140,89 @@ counts and the photo information panel. They are not written into
 `manuallyAssigned`. A previous positive human decision suppresses automatic
 reassignment, including after the old photo tag or person is removed.
 
+Removing an automatic body photo from an unnamed face cluster records the
+optional `rejectedAnchorFaceIDs` field on the body detection. It refers to stable
+face IDs rather than a device-local cluster ID, so naming or re-clustering does
+not silently discard the rejection. Rejected identities remain competitors when
+computing the margin; a rejection must not turn a runner-up into an automatic
+claim. Clients that do not understand this optional field preserve it with the
+rest of the body metadata. Existing account/local-mode edit restrictions remain
+in force.
+
+## Differences from reid-demo
+
+The integration retains OSNet-AIN x1.0, geometric face/body association, the
+0.74 attachment threshold, 0.05 ambiguity margin, 0.63 review threshold,
+three-hour capture-time guard and same-photo identity exclusion. It reuses
+Ente's generic person/pet detector rather than adding the demo's separate
+person-detector runtime. It does not replace Ente's face model or clustering.
+
+The attachment algorithm is deliberately not identical to the demo. The demo's
+`fusion.body_attach` compares a candidate time against the mean of an identity's
+seed timestamps within a pass, then immediately appends accepted body vectors
+as additional matching evidence. Ente compares each candidate against individual
+face-linked body anchors within three hours and never promotes an automatic
+body attachment into a new anchor. Missing/nonpositive timestamps are excluded.
+Review grouping additionally uses complete-link similarity >=0.8 with pairwise
+three-hour bounds, so a similarity chain cannot bridge dissimilar endpoints.
+The demo's legacy/fused configuration entries are not all active attachment
+rules and were not copied wholesale. Bounded two/three-hop propagation remains
+an evaluated proposal, not enabled behavior.
+
 ## Storage and review rendering
 
 Mobile stores each photo's body index as JSON TEXT in the existing ML database's
 `body_index` table. The JSON contains 512-dimensional vectors as numbers, boxes,
 IDs, model/schema versions and review feedback. Desktop stores the corresponding
 structured indexes in IndexedDB. Rendered body crops are local cache files, not
-image bytes in mldata. Remote mldata already goes through gzip before encryption.
+new fields or image bytes in mldata. Remote mldata already goes through gzip
+before encryption on both clients.
 
 Newly written vectors are rounded to four significant decimal digits and retain
 the existing numeric-array shape. A precision marker is informational; older
-body clients still read ordinary numbers. On 7,877 production OSNet vectors from
-Market-1501, mean absolute pairwise cosine change was `9.4e-6` (maximum
-`6.7e-5`). Across 62,047,129 pairs, 62 crossed the 0.74 match cutoff and 20
-crossed the 0.8 review-group cutoff. In a 500-vector, one-body-per-photo sample,
-median gzipped body metadata fell from 3,728 to 1,390 bytes (63%). These
-measurements estimate vector-heavy metadata; real albums vary.
-
+body clients still read the vectors as ordinary numbers. On 7,877 production
+OSNet vectors from Market-1501, the mean absolute pairwise cosine change was
+`9.4e-6` (maximum `6.7e-5`). Across 62,047,129 pairs, 62 crossed the 0.74 match
+cutoff and 20 crossed the 0.8 review-group cutoff. In a 500-vector, one-body
+per-photo serialization sample, median gzipped body metadata fell from 3,728 to
+1,390 bytes (63%). These measurements estimate vector-heavy metadata; real
+albums vary with detections per photo, feedback and the rest of mldata.
 The Penn-Fudan gate sweep found that stricter size/confidence filters save only
 about 6–9% of detections while losing some annotated people. The current
-thresholds remain unchanged: precision rounding reduces vector payload without
-suppressing small detections.
+thresholds remain unchanged: precision rounding cuts the estimated vector
+payload substantially without suppressing small detections.
 
-Mobile now reuses parsed body indexes until a body-index write or delete changes
-the local snapshot. Desktop tracks a lightweight body-index revision and reloads
-the full set only when that revision changes. This avoids rereading and
-stringifying every embedding for each review request. Matching still runs after
-relevant ML or feedback changes; no real-phone before/after timing is claimed.
+Mobile reuses its parsed body indexes until a body-index write or delete changes
+the in-memory DB snapshot. Desktop tracks a lightweight body-index revision in
+IndexedDB and only reloads the full set when that revision changes. This avoids
+re-reading and stringifying every embedding whenever body review suggestions are
+requested. The app still computes matches after relevant ML or feedback changes;
+no real-phone before/after timing is claimed.
+
+A host-side synthetic review benchmark used 7,877 one-detection indexes with
+the measured vectors (29.3 MB of JSON). Building the previous full review cache
+key with `JSON.stringify` took 248 ms median and 262 ms p95 on this host. This
+is not an Android timing; it shows the repeated work the revision cache removes.
+
+Non-review body thumbnails reuse the existing crop memory and temporary disk
+caches, isolate generator and bounded queues. In-flight body requests coalesce,
+and body tasks have separate IDs from face tasks for the same file. Mobile
+review previews use the existing encrypted gallery-thumbnail cache instead, as
+described below. Feedback still resolves and validates current group membership
+before writing anything. Desktop body crops reuse the existing `face-crops` blob
+cache and object-URL lifecycle. These local caches add no image bytes to mldata.
+
+The first uncached remote preview may still need source download and image
+decoding. Matching still reads body indexes after relevant changes, and Mobile
+matching runs in the Dart isolate. A follow-up can add per-file/incremental reads
+and time-indexed candidate lookup. Local-only float32 BLOB/typed-array storage
+can be evaluated if measured libraries still show costly local DB reads.
+
+Mobile review retains the existing layout and controls. Body previews center the
+body box and scale its longer physical side to fill the square tile. Excess
+photo edges are clipped; the area outside the rounded body box is dimmed by 55%.
+The bright window uses the existing thumbnail superellipse corner style. Face
+previews retain their cover fit; other body thumbnail surfaces are unchanged.
 
 A host-side synthetic review benchmark used 7,877 one-detection indexes with
 the measured vectors (29.3 MB of JSON). Building the previous full review cache

@@ -180,8 +180,9 @@ Future<IndexStatus> getIndexStatus() async {
 // indexing is disabled.
 int _lastFetchTimeForOthersIndexed = 0;
 
-Future<_OnlineMLIndexingCandidates>
-_getOnlineFilesForMlIndexingCandidates() async {
+Future<_OnlineMLIndexingCandidates> _getOnlineFilesForMlIndexingCandidates({
+  Set<int> bodyReindexFileIDs = const {},
+}) async {
   final mlDataDB = MLDataDB.instance;
   final time = DateTime.now();
   final Map<int, int> faceIndexedFileIDs = await mlDataDB.faceIndexedFileIds();
@@ -235,7 +236,11 @@ _getOnlineFilesForMlIndexingCandidates() async {
     final shouldRunBodies = !bodyIndexedFileIDs.containsKey(
       enteFile.uploadedFileID,
     );
-    if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
+    if (!shouldRunFaces &&
+        !shouldRunClip &&
+        !shouldRunPets &&
+        !(shouldRunBodies &&
+            bodyReindexFileIDs.contains(enteFile.uploadedFileID))) {
       continue;
     }
     final instruction = FileMLInstruction(
@@ -279,7 +284,11 @@ _getOnlineFilesForMlIndexingCandidates() async {
     final shouldRunBodies = !bodyIndexedFileIDs.containsKey(
       enteFile.uploadedFileID,
     );
-    if (!shouldRunFaces && !shouldRunClip && !shouldRunPets) {
+    if (!shouldRunFaces &&
+        !shouldRunClip &&
+        !shouldRunPets &&
+        !(shouldRunBodies &&
+            bodyReindexFileIDs.contains(enteFile.uploadedFileID))) {
       continue;
     }
     hiddenFilesToIndex.add(
@@ -311,9 +320,13 @@ _getOnlineFilesForMlIndexingCandidates() async {
   );
 }
 
-Future<List<FileMLInstruction>> getFilesForMlIndexing() async {
+Future<List<FileMLInstruction>> getFilesForMlIndexing({
+  Set<int> bodyReindexFileIDs = const {},
+}) async {
   _logger.info('getFilesForMlIndexing called');
-  final candidateSplit = await _getOnlineFilesForMlIndexingCandidates();
+  final candidateSplit = await _getOnlineFilesForMlIndexingCandidates(
+    bodyReindexFileIDs: bodyReindexFileIDs,
+  );
   if (!localSettings.isMLLocalIndexingEnabled) {
     final time = DateTime.now().millisecondsSinceEpoch;
     if ((time - _lastFetchTimeForOthersIndexed) > 1000 * 60 * 60 * 24) {
@@ -425,6 +438,7 @@ Stream<List<FileMLInstruction>> fetchEmbeddingsAndInstructions(
   int yieldSize, {
   required MLMode mode,
   MlRunControl? control,
+  Set<int> bodyReindexFileIDs = const {},
 }) async* {
   if (control?.stopRequested ?? false) return;
   if (mode == MLMode.localGallery) {
@@ -438,7 +452,9 @@ Stream<List<FileMLInstruction>> fetchEmbeddingsAndInstructions(
     return;
   }
   final mlDataDB = MLDataDB.instance;
-  final List<FileMLInstruction> filesToIndex = await getFilesForMlIndexing();
+  final List<FileMLInstruction> filesToIndex = await getFilesForMlIndexing(
+    bodyReindexFileIDs: bodyReindexFileIDs,
+  );
   final List<List<FileMLInstruction>> chunks = filesToIndex.chunks(
     embeddingFetchLimit,
   );

@@ -97,12 +97,15 @@ class DartMLDataDB
     final cached = _bodyIndexesCache;
     if (cached != null) {
       final versions = _bodyIndexVersionCache!;
-      if (cached.keys.every((fileID) => versions[fileID]! >= minimumVersion)) {
+      if (cached.keys.every(
+        (fileID) => versions[fileID]! >= minimumVersion,
+      )) {
         return cached;
       }
       return {
         for (final entry in cached.entries)
-          if (versions[entry.key]! >= minimumVersion) entry.key: entry.value,
+          if (versions[entry.key]! >= minimumVersion)
+            entry.key: entry.value,
       };
     }
     final rows = await (await asyncDB).getAll(
