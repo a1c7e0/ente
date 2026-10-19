@@ -48,6 +48,14 @@ Run body inference from mobile or desktop. Photos Web retains upstream's desktop
 
 The diagnostic APK uses a separate application ID and local database; it cannot read local-only ML data from another installed app. Account-backed metadata arrives through normal encrypted sync. Anonymous local-gallery indexing can run inference and save local-gallery indexes, but grouping, crops, and review still use uploaded file IDs and the account ML database. Named people and person suggestions retain upstream account requirements. Do not extend anonymous mode with save or review operations.
 
+On mobile, the ML debug page's **Auto-create unnamed people** threshold defaults to 10 distinct uploaded owner photos; set it to 0 to disable. After a normal ML run or manual clustering command, the app considers only existing unassigned clusters and creates at most 10 unnamed people in that pass. Creation uses encrypted cgroup sync and excludes face IDs already assigned in synced person feedback. These unnamed people can be reviewed and renamed through the existing People flows.
+
+Concurrent devices can briefly create duplicate people because cgroup creation has no idempotency key. After ordinary cgroup sync, the client reconciles only untouched automatic people whose original and current face sets match exactly, even if their cluster IDs differ. The lexicographically smallest person ID survives. Other copies become empty hidden records through the existing version-checked entity update, not deletion; their local mappings are removed on receiving devices.
+
+Person edits permanently clear creation provenance; body review claims that provenance with a version precondition before writing feedback. Named, edited, overlapping, legacy, and body-referenced people are preserved. Partial overlaps are never merged automatically. Failed cleanup retries on subsequent syncs, including empty diffs. These are client-side convergence guards, not a transaction spanning multiple people or body metadata; offline and concurrent canonical edits can still require manual review. The setting does not alter face clustering or auto-merge thresholds and does not trigger historical image reindexing.
+
+The experiment lives on `feat/auto-unnamed-person`, with focused verification on relevant pushes. It uses optional `isUnnamed`, `autoCreationFaceIDs`, and `autoDuplicateOf` person metadata fields; clients without support for `isUnnamed` treat empty-name people as ignored. Legacy ignored people remain ignored. APK builds remain manual.
+
 For ML Lab diagnostics and reset behavior, including reset scope and confirmation text, see [ML Lab](ml-lab.md). For detector evaluation details, see [mobile ML diagnostics](ml-diagnostics.md).
 
 ## Profile-face review experiment

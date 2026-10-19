@@ -30,7 +30,13 @@ class _PersonClustersPageState extends State<PersonClustersPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.person.data.name)),
+      appBar: AppBar(
+        title: Text(
+          widget.person.data.isUnnamed
+              ? context.strings.sameperson
+              : widget.person.data.name,
+        ),
+      ),
       body: FutureBuilder<Map<String, List<EnteFile>>>(
         future: SearchService.instance.getClusterFilesForPersonID(
           widget.person.remoteID,

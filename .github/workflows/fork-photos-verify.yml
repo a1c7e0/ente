@@ -5,6 +5,7 @@ on:
         branches:
             - main
             - feat/ml-lab
+            - feat/auto-unnamed-person
         paths:
             - ".github/actions/restore-rust-target/**"
             - ".github/actions/setup-flutter/**"
@@ -22,7 +23,7 @@ concurrency:
 
 jobs:
     verify:
-        if: github.repository == 'a1c7e0/ente' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab')
+        if: github.repository == 'a1c7e0/ente' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab' || github.ref == 'refs/heads/feat/auto-unnamed-person')
         runs-on: ubuntu-24.04
         timeout-minutes: 45
         env:
@@ -94,6 +95,11 @@ jobs:
             - name: Verify ML reset and synchronization
               working-directory: mobile/apps/photos
               run: flutter test --no-pub test/models/ml/face/person_cache_test.dart test/services/machine_learning/ml_photo_reset_service_test.dart test/services/machine_learning/metadata_sync_lock_test.dart
+
+            - name: Verify automatic unnamed people
+              if: hashFiles('mobile/apps/photos/test/services/machine_learning/auto_unnamed_person_service_test.dart') != ''
+              working-directory: mobile/apps/photos
+              run: flutter test --no-pub test/models/ml/face/person_test.dart test/services/machine_learning/auto_unnamed_person_service_test.dart test/services/machine_learning/auto_unnamed_deduplication_test.dart test/services/machine_learning/auto_unnamed_reconciliation_test.dart
 
             - name: Verify ML Lab diagnostics
               if: github.ref == 'refs/heads/feat/ml-lab'

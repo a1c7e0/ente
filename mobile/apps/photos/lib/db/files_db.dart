@@ -1617,6 +1617,21 @@ class FilesDB with SqlDbBase {
     return result;
   }
 
+  Future<Set<int>> getUploadedOwnerFileIDs(int ownerID) async {
+    final db = await instance.sqliteAsyncDB;
+    final rows = await db.getAll(
+      '''
+      SELECT $columnUploadedFileID
+      FROM $filesTable
+      WHERE $columnOwnerID = ?
+        AND $columnUploadedFileID IS NOT NULL
+        AND $columnUploadedFileID != -1;
+      ''',
+      [ownerID],
+    );
+    return rows.map((row) => row[columnUploadedFileID] as int).toSet();
+  }
+
   Future<EnteFile?> getCollectionFileFirstOrLast(
     int collectionID,
     bool sortAsc,
