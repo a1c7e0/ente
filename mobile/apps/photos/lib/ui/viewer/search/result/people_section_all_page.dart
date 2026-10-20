@@ -546,7 +546,11 @@ class _PeopleSectionAllWidgetState extends State<PeopleSectionAllWidget> {
           extraFaces.add(face);
         }
       }
-      if (normalFaces.isEmpty && extraFaces.isNotEmpty) {
+      // Existing people should not hide all unassigned clusters by default.
+      if (extraFaces.isNotEmpty &&
+          !normalFaces.any(
+            (face) => face.params.containsKey(kClusterParamId),
+          )) {
         normalFaces.addAll(extraFaces);
         extraFaces.clear();
       }
