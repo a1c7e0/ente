@@ -1644,19 +1644,22 @@ class SearchService {
           );
         }
       }
-      if (facesResult.isEmpty) {
-        if (fallbackMinClusterSize != null &&
-            fallbackMinClusterSize < minClusterSize) {
-          return await getAllFace(
-            limit,
-            minClusterSize: fallbackMinClusterSize,
-            showIgnoredOnly: showIgnoredOnly,
-            includeEmptyPersons: includeEmptyPersons,
-          );
-        } else {
-          return [];
-        }
+      // Named people should not suppress the fallback for unassigned clusters.
+      if (!showIgnoredOnly &&
+          clusterIdToFiles.isNotEmpty &&
+          fallbackMinClusterSize != null &&
+          fallbackMinClusterSize < minClusterSize &&
+          !facesResult.any(
+            (face) => face.params.containsKey(kClusterParamId),
+          )) {
+        return await getAllFace(
+          limit,
+          minClusterSize: fallbackMinClusterSize,
+          showIgnoredOnly: showIgnoredOnly,
+          includeEmptyPersons: includeEmptyPersons,
+        );
       }
+      if (facesResult.isEmpty) return [];
       sortPeopleFaces(
         facesResult,
         PeopleSortConfig(
