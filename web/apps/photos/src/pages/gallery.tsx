@@ -39,7 +39,7 @@ import { DuplicatesView } from "@/components/gallery/DuplicatesView";
 import { LargeFilesView } from "@/components/gallery/LargeFilesView";
 import { PeopleOverview } from "@/components/gallery/PeopleOverview";
 import { PhotosNavigationShell } from "@/components/gallery/PhotosNavigationShell";
-import { TrashFilesDialog } from "@/components/gallery/TrashFilesDialog";
+import { PublicLinkDetails } from "@/components/gallery/PublicLinkDetails";
 import {
     albumShortcutCollectionID,
     findCollectionCreatingIfNeeded,
@@ -54,6 +54,7 @@ import { Sidebar } from "@/components/sidebar/Sidebar";
 import {
     notifyOthersFilesDialogAttributes,
     notifyUnsupportedSharedFavoritesDialogAttributes,
+    trashFilesDialogAttributes,
 } from "@/components/utils/dialog-attributes";
 import { useIsOffline } from "@/components/utils/use-is-offline";
 import { shouldShowWhatsNew } from "@/services/changelog";
@@ -65,6 +66,7 @@ import {
     type AlbumFilter,
 } from "@/utils/album-filters";
 import type { PeopleSortBy } from "@/utils/people-sort";
+import { visibleQuickLinks } from "@/utils/quick-links";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import { Link, Typography } from "@mui/material";
 import { sessionExpiredDialogAttributes } from "ente-accounts/components/utils/dialog";
@@ -205,14 +207,6 @@ const Page: React.FC = () => {
     const isCleanupViewOpen = cleanupView !== undefined;
     const [isFirstLoad, setIsFirstLoad] = useState(false);
     const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
-    const [trashFilesDialog, setTrashFilesDialog] = useState<{
-        count: number;
-        onConfirm: () => void;
-    }>();
-    const {
-        show: showTrashFilesDialog,
-        props: trashFilesDialogVisibilityProps,
-    } = useModalVisibility();
     const [suppressContextSelectionBar, setSuppressContextSelectionBar] =
         useState(false);
     const [selected, setSelected] = useState<SelectedState>({
@@ -455,17 +449,68 @@ const Page: React.FC = () => {
             ? ItemVisibility.hidden
             : ItemVisibility.visible;
     const activeCollectionID =
-        state.view?.type == "people" || state.view?.type == "album-overview"
+        state.view?.type == "people" ||
+        state.view?.type == "album-overview" ||
+        state.view?.type == "links"
             ? undefined
             : state.view?.activeCollectionSummaryID;
     const activeCollection =
-        state.view?.type == "people" || state.view?.type == "album-overview"
+        state.view?.type == "people" ||
+        state.view?.type == "album-overview" ||
+        state.view?.type == "links"
             ? undefined
             : state.view?.activeCollection;
     const activeCollectionSummary =
-        state.view?.type == "people" || state.view?.type == "album-overview"
+        state.view?.type == "people" ||
+        state.view?.type == "album-overview" ||
+        state.view?.type == "links"
             ? undefined
             : state.view?.activeCollectionSummary;
+    const selectedLinkID =
+        state.view?.type == "links" ? state.view.selectedLinkID : undefined;
+    const quickLinks = useMemo(
+        () =>
+            visibleQuickLinks(
+                state.collections,
+                user?.id ?? 0,
+                state.hiddenCollectionIDs,
+            ),
+        [state.collections, user?.id, state.hiddenCollectionIDs],
+    );
+    const linkSummaries = useMemo(
+        () =>
+            new Map(
+                quickLinks.flatMap((collection) => {
+                    const summary = normalCollectionSummaries.get(
+                        collection.id,
+                    );
+                    return summary ? [[collection.id, summary] as const] : [];
+                }),
+            ),
+        [quickLinks, normalCollectionSummaries],
+    );
+    const selectedLink = quickLinks.find(({ id }) => id === selectedLinkID);
+    const selectedLinkSummary =
+        selectedLink && linkSummaries.get(selectedLink.id);
+    const selectedLinkFiles = useMemo(
+        () =>
+            selectedLinkID === undefined
+                ? []
+                : state.collectionFiles.filter(
+                      ({ id, collectionID }) =>
+                          collectionID === selectedLinkID &&
+                          !hiddenFileIDs.has(id) &&
+                          !tempDeletedFileIDs.has(id) &&
+                          !tempHiddenFileIDs.has(id),
+                  ),
+        [
+            selectedLinkID,
+            state.collectionFiles,
+            hiddenFileIDs,
+            tempDeletedFileIDs,
+            tempHiddenFileIDs,
+        ],
+    );
     const activePerson =
         state.view?.type == "people" ? state.view.activePerson : undefined;
     const activePersonID = activePerson?.id;
@@ -570,17 +615,21 @@ const Page: React.FC = () => {
         filteredFiles.length > 0 &&
         selectedFilesInView.length === filteredFiles.length;
 
-    const isInArchiveSection = barMode == "archive-albums";
-
     const barCollectionSummaries =
-        barMode == "hidden-albums"
-            ? state.hiddenCollectionSummaries
-            : barMode == "archive-albums"
-              ? state.archivedCollectionSummaries
-              : state.normalCollectionSummaries;
+        barMode == "links"
+            ? linkSummaries
+            : barMode == "hidden-albums"
+              ? state.hiddenCollectionSummaries
+              : barMode == "archive-albums"
+                ? state.archivedCollectionSummaries
+                : state.normalCollectionSummaries;
 
     useEffect(() => {
-        if (barMode != "albums" || activeCollectionID == PseudoCollectionID.all)
+        setAlbumSearchQuery("");
+    }, [barMode]);
+
+    useEffect(() => {
+        if (barMode == "albums" && activeCollectionID == PseudoCollectionID.all)
             setAlbumSearchQuery("");
     }, [barMode, activeCollectionID]);
 
@@ -1247,7 +1296,7 @@ const Page: React.FC = () => {
 
     const createFileOpHandler =
         (op: FileOp, options?: { suppressSelectionBar?: boolean }) => () => {
-            void (async () => {
+            return (async () => {
                 if (options?.suppressSelectionBar) {
                     setSuppressContextSelectionBar(true);
                 }
@@ -1352,7 +1401,9 @@ const Page: React.FC = () => {
                     clearSelection();
                     await remotePull({ silent: true, source: `file-op:${op}` });
                 } catch (e) {
-                    if (op == "sendLink") {
+                    if (op == "trash") {
+                        throw e;
+                    } else if (op == "sendLink") {
                         onSendLinkError(e);
                     } else {
                         onGenericError(e);
@@ -1578,6 +1629,12 @@ const Page: React.FC = () => {
     };
 
     const handleChangeBarMode = (mode: GalleryBarMode) => {
+        if (mode == "links") {
+            setCleanupView(undefined);
+            clearSelection();
+            dispatch({ type: "showLinks" });
+            return true;
+        }
         if (mode == "people") {
             return handleShowPeople();
         }
@@ -1714,15 +1771,14 @@ const Page: React.FC = () => {
     const handleDeleteFiles = useCallback(
         (suppressSelectionBar = false) => {
             if (selectedOwnCount === 0) return;
-            setTrashFilesDialog({
-                count: selectedOwnCount,
-                onConfirm: createFileOpHandler("trash", {
-                    suppressSelectionBar,
-                }),
-            });
-            showTrashFilesDialog();
+            showMiniDialog(
+                trashFilesDialogAttributes(
+                    selectedOwnCount,
+                    createFileOpHandler("trash", { suppressSelectionBar }),
+                ),
+            );
         },
-        [selectedOwnCount, createFileOpHandler, showTrashFilesDialog],
+        [selectedOwnCount, createFileOpHandler, showMiniDialog],
     );
     const selectedFavoriteCount = useMemo(
         () => countSelectedFavorites(selected, favoriteFileIDs),
@@ -1773,32 +1829,44 @@ const Page: React.FC = () => {
             const suppressSelectionBar = !!meta?.isEphemeralSingleSelection;
             switch (action) {
                 case "sendLink":
-                    createFileOpHandler("sendLink", { suppressSelectionBar })();
+                    void createFileOpHandler("sendLink", {
+                        suppressSelectionBar,
+                    })();
                     break;
                 case "download":
-                    createFileOpHandler("download", { suppressSelectionBar })();
+                    void createFileOpHandler("download", {
+                        suppressSelectionBar,
+                    })();
                     break;
                 case "favorite":
-                    createFileOpHandler("favorite", { suppressSelectionBar })();
+                    void createFileOpHandler("favorite", {
+                        suppressSelectionBar,
+                    })();
                     break;
                 case "unfavorite":
-                    createFileOpHandler("unfavorite", {
+                    void createFileOpHandler("unfavorite", {
                         suppressSelectionBar,
                     })();
                     break;
                 case "archive":
-                    createFileOpHandler("archive", { suppressSelectionBar })();
+                    void createFileOpHandler("archive", {
+                        suppressSelectionBar,
+                    })();
                     break;
                 case "unarchive":
-                    createFileOpHandler("unarchive", {
+                    void createFileOpHandler("unarchive", {
                         suppressSelectionBar,
                     })();
                     break;
                 case "hide":
-                    createFileOpHandler("hide", { suppressSelectionBar })();
+                    void createFileOpHandler("hide", {
+                        suppressSelectionBar,
+                    })();
                     break;
                 case "fixTime":
-                    createFileOpHandler("fixTime", { suppressSelectionBar })();
+                    void createFileOpHandler("fixTime", {
+                        suppressSelectionBar,
+                    })();
                     break;
                 case "trash":
                     handleDeleteFiles(suppressSelectionBar);
@@ -1806,6 +1874,7 @@ const Page: React.FC = () => {
                 case "deletePermanently":
                     showMiniDialog({
                         title: t("delete_files_title"),
+                        kind: "warning",
                         message: t("delete_files_message"),
                         continue: {
                             text: t("delete"),
@@ -2075,12 +2144,6 @@ const Page: React.FC = () => {
                 files={fixCreationTimeFiles}
                 onRemotePull={remotePull}
             />
-            {trashFilesDialog && (
-                <TrashFilesDialog
-                    {...trashFilesDialogVisibilityProps}
-                    {...trashFilesDialog}
-                />
-            )}
             <PhotosNavigationShell
                 showRail
                 showNormalNavigation={showNormalNavigation}
@@ -2104,19 +2167,21 @@ const Page: React.FC = () => {
                               // TODO: These are incorrect assertions, the types of the
                               // component need to be updated.
                               activeCollection: activeCollection!,
-                              activeCollectionID: activeCollectionID!,
+                              activeCollectionID: (barMode == "links"
+                                  ? selectedLinkID
+                                  : activeCollectionID)!,
                               activePerson,
                               albumFilter,
                               albumSearchQuery,
                               onAlbumSearchQueryChange: setAlbumSearchQuery,
                               onShowAlbumOverview: handleShowAlbumOverview,
+                              onShowPeopleOverview: handleShowPeople,
                               onAlbumSummariesChange:
                                   handleAlbumSummariesChange,
                               peopleSortBy,
                               onChangePeopleSortBy: setPeopleSortBy,
                               setFileListHeader,
                               saveGroups,
-                              canCreateAlbum: !isInArchiveSection,
                               onAddSaveGroup,
                               onEditAlbumDetails: showEditAlbumDetails,
                               onShowMap: handleShowCollectionMap,
@@ -2135,13 +2200,15 @@ const Page: React.FC = () => {
                                   (state.view?.type == "people"
                                       ? state.view.visiblePeople
                                       : undefined) ?? [],
-                              allPeople:
-                                  (state.view?.type == "people"
-                                      ? state.view.people
-                                      : undefined) ?? [],
                               setBlockingLoad,
                               setActiveCollectionID:
-                                  handleShowCollectionSummaryWithID,
+                                  barMode == "links"
+                                      ? (collectionID) =>
+                                            dispatch({
+                                                type: "selectLink",
+                                                collectionID,
+                                            })
+                                      : handleShowCollectionSummaryWithID,
                               hasActiveFileSelection,
                               onRemotePull: remotePull,
                               onSelectPerson: handleSelectPerson,
@@ -2196,6 +2263,22 @@ const Page: React.FC = () => {
                     <DuplicatesView onRemoteFilesPull={remoteFilesPull} />
                 ) : cleanupView === "large-files" ? (
                     <LargeFilesView onRemoteFilesPull={remoteFilesPull} />
+                ) : !isInSearchMode && barMode == "links" ? (
+                    selectedLink ? (
+                        <PublicLinkDetails
+                            key={selectedLink.id}
+                            collection={selectedLink}
+                            fileCount={
+                                selectedLinkSummary?.fileCount ??
+                                selectedLinkFiles.length
+                            }
+                            files={selectedLinkFiles}
+                            user={user}
+                            setBlockingLoad={setBlockingLoad}
+                            onRemotePull={remotePull}
+                            coverFile={selectedLinkSummary?.coverFile}
+                        />
+                    ) : null
                 ) : !isInSearchMode &&
                   !isFirstLoad &&
                   !state.collectionFiles.length &&
@@ -2206,6 +2289,7 @@ const Page: React.FC = () => {
                     />
                 ) : !isInSearchMode && !isFirstLoad && isAlbumOverview ? (
                     <AlbumsOverview
+                        onRemotePull={remotePull}
                         albums={overviewAlbums}
                         title={(
                             albumFilters.find(
@@ -2228,6 +2312,7 @@ const Page: React.FC = () => {
                   !state.view.activePerson ? (
                     <PeopleOverview
                         people={state.view.visiblePeople}
+                        allPeople={state.view.people}
                         peopleSortBy={peopleSortBy}
                         onSelectPerson={handleSelectPerson}
                     />

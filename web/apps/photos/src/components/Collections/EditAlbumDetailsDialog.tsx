@@ -28,6 +28,7 @@ import {
     maxAlbumDescriptionLength,
     type Collection,
 } from "ente-media/collection";
+import { sortFiles } from "ente-media/collection-sort";
 import type { EnteFile } from "ente-media/file";
 import { FileType } from "ente-media/file-type";
 import { ItemCard } from "ente-new/photos/components/Tiles";
@@ -113,6 +114,7 @@ export const EditAlbumDetailsDialog: React.FC<EditAlbumDetailsDialogProps> = ({
         if (hasChanges) {
             showMiniDialog({
                 title: t("discard_changes"),
+                kind: "warning",
                 message: t("discard_changes_confirm_message"),
                 continue: {
                     text: t("discard"),
@@ -140,14 +142,14 @@ export const EditAlbumDetailsDialog: React.FC<EditAlbumDetailsDialogProps> = ({
     );
     const effectiveCoverID =
         pendingCoverID ?? collection.pubMagicMetadata?.data.coverID ?? 0;
+    const defaultCoverFile = () =>
+        sortFiles([...files], collection.pubMagicMetadata?.data.asc)[0];
     const effectiveCoverFile =
         pendingCoverID === undefined
             ? initialCoverFile
             : pendingCoverID > 0
               ? files.find(({ id }) => id === pendingCoverID)
-              : collection.pubMagicMetadata?.data.asc
-                ? files.at(-1)
-                : files[0];
+              : defaultCoverFile();
 
     return (
         <>

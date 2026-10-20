@@ -7,6 +7,7 @@ import { uploadManager } from "@/services/upload-manager";
 import {
     Album02Icon,
     Home01Icon,
+    Link05Icon,
     Settings01Icon,
     Upload01Icon,
     UserGroupIcon,
@@ -80,7 +81,7 @@ export const PhotosNavigationShell: React.FC<
         if (!mobile) closeMobileNavigation();
     }, [mobile, closeMobileNavigation]);
     const handleChangeMode = (mode: GalleryBarMode) => {
-        if (mode == "people") {
+        if (mode == "people" && !mobile) {
             closeMobileNavigation();
             props.onChangeMode(mode);
             return;
@@ -336,7 +337,7 @@ const NormalNavigationRail: React.FC<
                 ...theme.applyStyles("dark", { bgcolor: "#3E3E3E" }),
             })}
         />
-        {(["albums", "people"] as const).map((item) =>
+        {(["albums", "people", "links"] as const).map((item) =>
             item == "people" && !isMLSupported ? null : (
                 <Tooltip key={item} title={t(item)}>
                     <FocusVisibleButton
@@ -370,7 +371,11 @@ const NormalNavigationRail: React.FC<
                     >
                         <HugeiconsIcon
                             icon={
-                                item == "albums" ? Album02Icon : UserGroupIcon
+                                item == "albums"
+                                    ? Album02Icon
+                                    : item == "links"
+                                      ? Link05Icon
+                                      : UserGroupIcon
                             }
                             size={20}
                             strokeWidth={1.8}

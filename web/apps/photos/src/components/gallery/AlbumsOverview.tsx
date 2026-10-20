@@ -1,9 +1,15 @@
+import { useDeleteEmptyAlbums } from "@/components/Collections/useDeleteEmptyAlbums";
+import type { RemotePullOpts } from "@/components/gallery";
 import type { AlbumFilter } from "@/utils/album-filters";
+import { Delete02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import AddIcon from "@mui/icons-material/Add";
 import PushPinIcon from "@mui/icons-material/PushPin";
 import {
     Box,
+    IconButton,
     Stack,
+    Tooltip,
     Typography,
     styled,
     useMediaQuery,
@@ -28,6 +34,7 @@ interface AlbumsOverviewProps {
     sortBy: CollectionsSortBy;
     onSelectAlbum: (id: number) => void;
     onCreateAlbum: () => void;
+    onRemotePull: (opts?: RemotePullOpts) => Promise<void>;
 }
 
 export const AlbumsOverview = ({
@@ -38,6 +45,7 @@ export const AlbumsOverview = ({
     sortBy,
     onSelectAlbum,
     onCreateAlbum,
+    onRemotePull,
 }: AlbumsOverviewProps) => {
     const compact = useMediaQuery(useTheme().breakpoints.down("md"));
     const listRef = useRef<FixedSizeList>(null);
@@ -55,6 +63,12 @@ export const AlbumsOverview = ({
         return () => observer.disconnect();
     }, [listElement]);
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+    const { handleDeleteEmptyAlbums, hasEnoughEmptyAlbums } =
+        useDeleteEmptyAlbums(albums, onRemotePull);
+    const showDeleteEmptyAlbums =
+        filter == "empty-albums" &&
+        hasEnoughEmptyAlbums &&
+        !normalizedSearchQuery;
     const showCreate = filter == "ente" && !normalizedSearchQuery;
     const tileWidth = compact ? 104 : 140;
     const columnGap = compact ? 12 : 22;
@@ -72,103 +86,132 @@ export const AlbumsOverview = ({
     }, [filter, normalizedSearchQuery, sortBy]);
 
     return (
-        <Stack
-            sx={{
-                flex: 1,
-                minHeight: 0,
-                overflow: "hidden",
-                px: { xs: "14px", md: "24px" },
-                pb: { xs: "16px", md: "36px" },
-                gap: "24px",
-            }}
-        >
+        <>
             <Stack
                 sx={{
-                    flexShrink: 0,
-                    minHeight: 54,
-                    justifyContent: "center",
-                    gap: "2px",
+                    flex: 1,
+                    minHeight: 0,
+                    overflow: "hidden",
+                    px: { xs: "14px", md: "24px" },
+                    pb: { xs: "16px", md: "36px" },
+                    gap: "24px",
                 }}
             >
-                <Typography
-                    component="h1"
+                <Stack
                     sx={{
-                        fontFamily: '"Outfit Variable", Outfit, sans-serif',
-                        fontSize: { xs: 20, md: 24 },
-                        lineHeight: { xs: "26px", md: "32px" },
-                        fontWeight: 600,
+                        flexShrink: 0,
+                        minHeight: 54,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: 2,
                     }}
                 >
-                    {displayTitle}
-                </Typography>
-                <Typography
-                    sx={{
-                        fontSize: { xs: 12, md: 14 },
-                        lineHeight: "20px",
-                        color: "text.muted",
-                    }}
-                >
-                    {t("album_overview_count", { count: albums.length })}
-                </Typography>
-            </Stack>
-            {!albums.length && !showCreate ? (
-                <Typography
-                    role="status"
-                    sx={{ color: "text.muted", fontSize: 14 }}
-                >
-                    {t("no_results")}
-                </Typography>
-            ) : (
-                <Box
-                    sx={{
-                        flex: 1,
-                        minHeight: 0,
-                        "--album-tile-width": `${tileWidth}px`,
-                        "--album-name-size": compact ? "13px" : "14px",
-                        "--album-count-size": compact ? "11px" : "12px",
-                    }}
-                >
-                    <AutoSizer>
-                        {({ width, height }) => {
-                            const columns = Math.max(
-                                1,
-                                Math.floor(
-                                    (width - scrollbarWidth + columnGap) /
-                                        (tileWidth + columnGap),
-                                ),
-                            );
-                            return (
-                                <FixedSizeList
-                                    ref={listRef}
-                                    outerRef={setListElement}
-                                    width={width}
-                                    height={height}
-                                    itemCount={Math.ceil(
-                                        (albums.length + Number(showCreate)) /
-                                            columns,
-                                    )}
-                                    itemSize={cardHeight + rowGap}
-                                    overscanCount={1}
-                                    useIsScrolling
-                                    style={{ overflowX: "hidden" }}
-                                    itemData={{
-                                        albums,
-                                        columns,
-                                        columnGap,
-                                        tileWidth,
-                                        showCreate,
-                                        onSelectAlbum,
-                                        onCreateAlbum,
-                                    }}
-                                >
-                                    {AlbumsRow}
-                                </FixedSizeList>
-                            );
+                    <Stack sx={{ minWidth: 0, gap: "2px" }}>
+                        <Typography
+                            component="h1"
+                            sx={{
+                                fontFamily:
+                                    '"Outfit Variable", Outfit, sans-serif',
+                                fontSize: { xs: 20, md: 24 },
+                                lineHeight: { xs: "26px", md: "32px" },
+                                fontWeight: 600,
+                            }}
+                        >
+                            {displayTitle}
+                        </Typography>
+                        <Typography
+                            sx={{
+                                fontSize: { xs: 12, md: 14 },
+                                lineHeight: "20px",
+                                color: "text.muted",
+                            }}
+                        >
+                            {t("album_overview_count", {
+                                count: albums.length,
+                            })}
+                        </Typography>
+                    </Stack>
+                    {showDeleteEmptyAlbums && (
+                        <Tooltip title={t("delete_empty_albums")}>
+                            <IconButton
+                                aria-label={t("delete_empty_albums")}
+                                onClick={handleDeleteEmptyAlbums}
+                                sx={{
+                                    flexShrink: 0,
+                                    marginInlineStart: "auto",
+                                }}
+                            >
+                                <HugeiconsIcon
+                                    icon={Delete02Icon}
+                                    size={22}
+                                    strokeWidth={1.5}
+                                />
+                            </IconButton>
+                        </Tooltip>
+                    )}
+                </Stack>
+                {!albums.length && !showCreate ? (
+                    <Typography
+                        role="status"
+                        sx={{ color: "text.muted", fontSize: 14 }}
+                    >
+                        {t("no_results")}
+                    </Typography>
+                ) : (
+                    <Box
+                        sx={{
+                            flex: 1,
+                            minHeight: 0,
+                            "--album-tile-width": `${tileWidth}px`,
+                            "--album-name-size": compact ? "13px" : "14px",
+                            "--album-count-size": compact ? "11px" : "12px",
                         }}
-                    </AutoSizer>
-                </Box>
-            )}
-        </Stack>
+                    >
+                        <AutoSizer>
+                            {({ width, height }) => {
+                                const columns = Math.max(
+                                    1,
+                                    Math.floor(
+                                        (width - scrollbarWidth + columnGap) /
+                                            (tileWidth + columnGap),
+                                    ),
+                                );
+                                return (
+                                    <FixedSizeList
+                                        ref={listRef}
+                                        outerRef={setListElement}
+                                        width={width}
+                                        height={height}
+                                        itemCount={Math.ceil(
+                                            (albums.length +
+                                                Number(showCreate)) /
+                                                columns,
+                                        )}
+                                        itemSize={cardHeight + rowGap}
+                                        overscanCount={1}
+                                        useIsScrolling
+                                        style={{ overflowX: "hidden" }}
+                                        itemData={{
+                                            albums,
+                                            columns,
+                                            columnGap,
+                                            tileWidth,
+                                            showCreate,
+                                            onSelectAlbum,
+                                            onCreateAlbum,
+                                        }}
+                                    >
+                                        {AlbumsRow}
+                                    </FixedSizeList>
+                                );
+                            }}
+                        </AutoSizer>
+                    </Box>
+                )}
+            </Stack>
+        </>
     );
 };
 
