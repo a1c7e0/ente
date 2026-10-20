@@ -11,7 +11,6 @@ import "package:photos/ui/components/buttons/button_widget.dart";
 import "package:photos/ui/components/models/button_type.dart";
 import "package:photos/ui/components/settings/settings_grouped_card.dart";
 import "package:photos/ui/components/toggle_switch_widget.dart";
-import "package:photos/ui/settings/ml/auto_unnamed_person_threshold_setting.dart";
 import "package:photos/ui/settings/ml/ml_debug_actions.dart";
 import "package:photos/utils/dialog_util.dart";
 
@@ -221,7 +220,6 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
           max: _clusteringMax,
           onChanged: _updateDefaultClusteringDistance,
         ),
-        const AutoUnnamedPersonThresholdSetting(),
       ],
     );
   }

@@ -19,29 +19,5 @@ void main() {
       expect(person.assigned.single.id, "cluster-1");
       expect(person.assigned.single.faces, {"face-1"});
     });
-
-    test("preserves auto-unnamed state and clears it when named", () {
-      final person = PersonData.fromJson({
-        "name": "",
-        "isUnnamed": true,
-        "assigned": [],
-      });
-
-      expect(person.isIgnored, isFalse);
-      final restored = PersonData.fromJson(person.toJson());
-      expect(restored.isUnnamed, isTrue);
-      expect(restored.isIgnored, isFalse);
-      final renamed = restored.copyWith(name: "Jordan");
-      expect(renamed.name, "Jordan");
-      expect(renamed.isUnnamed, isFalse);
-      expect(renamed.isIgnored, isFalse);
-    });
-
-    test("keeps missing unnamed marker false for legacy empty names", () {
-      final legacy = PersonData.fromJson({"name": ""});
-
-      expect(legacy.isUnnamed, isFalse);
-      expect(legacy.isIgnored, isTrue);
-    });
   });
 }

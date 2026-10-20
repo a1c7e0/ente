@@ -536,7 +536,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    personPage && !relevantPerson.data.isUnnamed
+                    personPage
                         ? RichText(
                             textAlign: TextAlign.center,
                             text: TextSpan(

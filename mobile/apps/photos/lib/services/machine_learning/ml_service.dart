@@ -7,7 +7,6 @@ import "dart:typed_data" show Uint8List;
 import "package:flutter/foundation.dart" show kDebugMode;
 import "package:flutter/widgets.dart" show AppLifecycleState, WidgetsBinding;
 import "package:logging/logging.dart";
-import "package:photos/core/configuration.dart";
 import "package:photos/core/event_bus.dart";
 import "package:photos/db/files_db.dart";
 import "package:photos/db/ml/base.dart";
@@ -29,7 +28,6 @@ import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_clustering_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_db_info_for_clustering.dart";
-import "package:photos/services/machine_learning/face_ml/person/auto_unnamed_person_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_exceptions.dart";
 import "package:photos/services/machine_learning/ml_indexing_isolate.dart";
@@ -525,11 +523,6 @@ class MLService {
         _logRunStopped(control, "after post-run person sync");
         return MlRunDisposition.stopped;
       }
-      await _createEligibleUnnamedPersons(control: control);
-      if (control.stopRequested) {
-        _logRunStopped(control, "after unnamed person creation");
-        return MlRunDisposition.stopped;
-      }
       if (_mlControllerStatus == true) {
         await magicCacheService.updateCache(forced: force);
         if (control.stopRequested) {
@@ -851,16 +844,11 @@ class MLService {
     final attempt = await _runExclusiveWithControl(
       MlOperation.clustering,
       control,
-      () async {
-        await _clusterAllImages(
-          clusterInBuckets: clusterInBuckets,
-          force: force,
-          control: control,
-        );
-        if (!control.stopRequested) {
-          await _createEligibleUnnamedPersons(control: control);
-        }
-      },
+      () => _clusterAllImages(
+        clusterInBuckets: clusterInBuckets,
+        force: force,
+        control: control,
+      ),
     );
     if (attempt != MlLockAttempt.ran) {
       _logger.info(
@@ -1076,111 +1064,6 @@ class MLService {
       _logger.severe("`clusterAllImages` failed", e, s);
     } finally {
       _clusteringIsHappening = false;
-    }
-  }
-
-  Future<void> _createEligibleUnnamedPersons({
-    required MlRunControl control,
-  }) async {
-    try {
-      await _createEligibleUnnamedPersonsSafely(control: control);
-    } catch (error, stackTrace) {
-      _logger.warning(
-        "Auto-unnamed person pass failed; continuing ML run",
-        error,
-        stackTrace,
-      );
-    }
-  }
-
-  Future<void> _createEligibleUnnamedPersonsSafely({
-    required MlRunControl control,
-  }) async {
-    if (control.stopRequested || !hasGrantedMLConsent || isLocalGalleryMode) {
-      return;
-    }
-    final threshold = localSettings.autoUnnamedPersonPhotoThreshold;
-    if (threshold <= 0) return;
-    final ownerID = Configuration.instance.getUserID();
-    if (ownerID == null) return;
-    final uploadedFileIDs = await FilesDB.instance.getUploadedOwnerFileIDs(
-      ownerID,
-    );
-
-    final personService = PersonService.instance;
-    // Refresh encrypted feedback before making decisions so remote assignments
-    // and ignored people are included even when the local mapping table lags.
-    await personService.sync();
-    final persons = await personService.getPersons();
-    final dbMappings = await _mlDataDB.getPersonToClusterIdToFaceIds();
-    final assignedClusterIDs = <String>{
-      ...AutoUnnamedPersonService.assignedClusterIDs(persons),
-      for (final clusters in dbMappings.values) ...clusters.keys,
-    };
-    final assignedFaceIDs = <String>{
-      ...AutoUnnamedPersonService.assignedFaceIDs(persons),
-      for (final clusters in dbMappings.values)
-        for (final faceIDs in clusters.values) ...faceIDs,
-    };
-    final clusters = await _mlDataDB.getAllClusterIdToFaceIDs();
-    final candidates = AutoUnnamedPersonService.eligibleClusters(
-      threshold: threshold,
-      clusterToFaceIDs: clusters,
-      assignedClusterIDs: assignedClusterIDs,
-      assignedFaceIDs: assignedFaceIDs,
-      uploadedFileIDs: uploadedFileIDs,
-    );
-
-    var created = 0;
-    for (final clusterID in candidates) {
-      if (control.stopRequested ||
-          !hasGrantedMLConsent ||
-          isLocalGalleryMode ||
-          localSettings.autoUnnamedPersonPhotoThreshold != threshold ||
-          Configuration.instance.getUserID() != ownerID) {
-        break;
-      }
-      // Re-check immediately before each entity creation. Another local action
-      // or a feedback sync may have assigned this cluster since selection.
-      final currentPersons = await personService.getPersons();
-      final currentMappings = await _mlDataDB.getPersonToClusterIdToFaceIds();
-      final currentlyAssignedClusters = <String>{
-        ...AutoUnnamedPersonService.assignedClusterIDs(currentPersons),
-        for (final clusters in currentMappings.values) ...clusters.keys,
-      };
-      if (currentlyAssignedClusters.contains(clusterID)) continue;
-      final currentAssignedFaceIDs = <String>{
-        ...AutoUnnamedPersonService.assignedFaceIDs(currentPersons),
-        for (final clusters in currentMappings.values)
-          for (final faceIDs in clusters.values) ...faceIDs,
-      };
-      if ((clusters[clusterID] ?? const <String>[]).any(
-        currentAssignedFaceIDs.contains,
-      )) {
-        continue;
-      }
-      if (control.stopRequested ||
-          !hasGrantedMLConsent ||
-          isLocalGalleryMode ||
-          localSettings.autoUnnamedPersonPhotoThreshold != threshold ||
-          Configuration.instance.getUserID() != ownerID) {
-        break;
-      }
-      try {
-        final createdPerson = await personService
-            .addUnnamedPersonForClusterIfAbsent(clusterID);
-        if (createdPerson != null) created++;
-      } catch (error, stackTrace) {
-        _logger.warning(
-          "Failed to create unnamed person for cluster $clusterID",
-          error,
-          stackTrace,
-        );
-      }
-    }
-    if (created > 0) {
-      _logger.info("Created $created unnamed people from eligible clusters");
-      Bus.instance.fire(PeopleChangedEvent());
     }
   }
 

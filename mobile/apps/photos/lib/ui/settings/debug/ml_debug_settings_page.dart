@@ -32,7 +32,6 @@ import "package:photos/ui/components/settings/settings_grouped_card.dart";
 import "package:photos/ui/components/toggle_switch_widget.dart";
 import "package:photos/ui/notification/toast.dart";
 import "package:photos/ui/settings/debug/memories_debug_page.dart";
-import "package:photos/ui/settings/ml/auto_unnamed_person_threshold_setting.dart";
 import "package:photos/ui/settings/ml/ml_debug_actions.dart";
 import "package:photos/utils/dialog_util.dart";
 import "package:photos/utils/ml_util.dart";
@@ -503,7 +502,6 @@ class _MLDebugSettingsPageState extends State<MLDebugSettingsPage> {
           max: _clusteringMax,
           onChanged: _updateDefaultClusteringDistance,
         ),
-        const AutoUnnamedPersonThresholdSetting(),
       ],
     );
   }

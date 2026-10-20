@@ -209,15 +209,14 @@ class _PeoplePageState extends State<PeoplePage> {
 
   bool _shouldShowMemoryCountTitleForIgnoredPerson() {
     final normalizedName = _person.data.name.trim();
-    return (_person.data.isUnnamed && normalizedName.isEmpty) ||
-        (_person.data.isIgnored &&
-            (normalizedName.isEmpty ||
-                normalizedName == "(ignored)" ||
-                normalizedName == "(hidden)"));
+    return _person.data.isIgnored &&
+        (normalizedName.isEmpty ||
+            normalizedName == "(ignored)" ||
+            normalizedName == "(hidden)");
   }
 
   String _getPeoplePageTitle(BuildContext context) {
-    if (!_person.data.isIgnored && !_person.data.isUnnamed) {
+    if (!_person.data.isIgnored) {
       return _person.data.name;
     }
     if (_shouldShowMemoryCountTitleForIgnoredPerson()) {

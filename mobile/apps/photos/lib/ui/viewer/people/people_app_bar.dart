@@ -586,8 +586,7 @@ class _AppBarWidgetState extends State<PeopleAppBar> {
   }
 
   Future<void> _showPerson(BuildContext context) async {
-    final isUnnamedIgnoredPerson =
-        !person.data.isUnnamed && _isLegacyIgnoredName(person.data.name);
+    final isUnnamedIgnoredPerson = _isLegacyIgnoredName(person.data.name);
     var shouldCloseDetailPage = false;
     final result = await showChoiceDialog(
       context,

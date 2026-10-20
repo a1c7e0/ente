@@ -106,8 +106,6 @@ class LocalSettings {
   static const _kAutoMergeThresholdOverride = "ml_debug.auto_merge_threshold";
   static const _kDefaultClusteringDistanceOverride =
       "ml_debug.default_clustering_distance";
-  static const _kAutoUnnamedPersonPhotoThreshold =
-      "ml_debug.auto_unnamed_person_photo_threshold";
   static const _kRunMLDuringInteractionOverride =
       "ml_debug.run_ml_during_interaction";
   static const _kShowMLDebugOptions = "ml_debug.show_ml_debug_options";
@@ -407,13 +405,6 @@ class LocalSettings {
       return;
     }
     await _prefs.setDouble(_kDefaultClusteringDistanceOverride, value);
-  }
-
-  int get autoUnnamedPersonPhotoThreshold =>
-      _prefs.getInt(_kAutoUnnamedPersonPhotoThreshold) ?? 10;
-
-  Future<void> setAutoUnnamedPersonPhotoThreshold(int value) async {
-    await _prefs.setInt(_kAutoUnnamedPersonPhotoThreshold, value.clamp(0, 100));
   }
 
   bool get petRecognitionEnabled =>
