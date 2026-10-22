@@ -287,34 +287,58 @@ class UserService {
     bool shouldCache = true,
   }) async {
     _logger.info("Fetching user details");
+    final sessionUserId = _config.getUserID();
+    final sessionToken = _config.getToken();
     final bool previousEmailMFAStatus = hasEmailMFAEnabled();
     final bool previousTwoFactorStatus = hasEnabledTwoFactor();
     final userDetails = await _gateway.getUserDetails(memoryCount: memoryCount);
+    _ensureUserDetailsSession(sessionUserId, sessionToken);
     if (shouldCache) {
       await _preferences.setString(keyUserDetails, userDetails.toJson());
+      _ensureUserDetailsSession(sessionUserId, sessionToken);
       bool hasSecurityStatusChanged = false;
       if (userDetails.profileData != null) {
         final bool currentEmailMFAStatus =
             userDetails.profileData!.isEmailMFAEnabled;
         await _preferences.setBool(kIsEmailMFAEnabled, currentEmailMFAStatus);
+        _ensureUserDetailsSession(sessionUserId, sessionToken);
         hasSecurityStatusChanged =
             hasSecurityStatusChanged ||
             previousEmailMFAStatus != currentEmailMFAStatus;
         final bool currentTwoFactorStatus =
             userDetails.profileData!.isTwoFactorEnabled;
-        await setTwoFactor(value: currentTwoFactorStatus);
+        await _preferences.setBool(
+          keyHasEnabledTwoFactor,
+          currentTwoFactorStatus,
+        );
+        _ensureUserDetailsSession(sessionUserId, sessionToken);
         hasSecurityStatusChanged =
             hasSecurityStatusChanged ||
             previousTwoFactorStatus != currentTwoFactorStatus;
       }
       if (hasSecurityStatusChanged) {
+        _ensureUserDetailsSession(sessionUserId, sessionToken);
         Bus.instance.fire(UserDetailsChangedEvent());
       }
       if (userDetails.email != _config.getEmail()) {
-        await setEmail(userDetails.email);
+        await _config.setEmail(userDetails.email);
+        _ensureUserDetailsSession(sessionUserId, sessionToken);
+        emailValueNotifier.value = userDetails.email;
       }
     }
+    _ensureUserDetailsSession(sessionUserId, sessionToken);
     return userDetails;
+  }
+
+  void _ensureUserDetailsSession(int? userId, String? token) {
+    if (_config.getUserID() == userId && _config.getToken() == token) {
+      return;
+    }
+    throw DioException(
+      requestOptions: RequestOptions(path: "/users/details/v2"),
+      type: DioExceptionType.cancel,
+      message: "User details response belongs to a stale account session",
+    );
   }
 
   Future<Sessions> getActiveSessions() async {

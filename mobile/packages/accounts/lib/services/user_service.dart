@@ -53,8 +53,8 @@ class UserService {
   static const kCanDisableEmailMFA = "can_disable_email_mfa";
   static const kIsEmailMFAEnabled = "is_email_mfa_enabled";
   final SRP6GroupParameters kDefaultSrpGroup = SRP6StandardGroups.rfc5054_4096;
-  final _dio = Network.instance.getDio();
-  final _enteDio = Network.instance.enteDio;
+  final Dio _dio;
+  final Dio _enteDio;
   final _logger = Logger((UserService).toString());
   late SharedPreferences _preferences;
   late ValueNotifier<String?> emailValueNotifier;
@@ -62,7 +62,21 @@ class UserService {
   late BaseHomePage _homePage;
   InstallSourceHandler? _installSourceHandler;
 
-  UserService._privateConstructor();
+  UserService._privateConstructor()
+    : _dio = Network.instance.getDio(),
+      _enteDio = Network.instance.enteDio;
+
+  @visibleForTesting
+  UserService.test({
+    required Dio enteDio,
+    required BaseConfiguration config,
+    required SharedPreferences preferences,
+  }) : _dio = Dio(),
+       _enteDio = enteDio {
+    _config = config;
+    _preferences = preferences;
+    emailValueNotifier = ValueNotifier<String?>(config.getEmail());
+  }
 
   static final UserService instance = UserService._privateConstructor();
 
@@ -210,37 +224,58 @@ class UserService {
     bool memoryCount = false,
     bool shouldCache = true,
   }) async {
+    final sessionUserId = _config.getUserID();
+    final sessionToken = _config.getToken();
     try {
       final response = await _enteDio.get(
         "/users/details/v2",
         queryParameters: {"memoryCount": memoryCount},
       );
+      _ensureUserDetailsSession(sessionUserId, sessionToken);
       final userDetails = UserDetails.fromMap(response.data);
       if (shouldCache) {
         await _preferences.setString(keyUserDetails, userDetails.toJson());
+        _ensureUserDetailsSession(sessionUserId, sessionToken);
         if (userDetails.profileData != null) {
           await _preferences.setBool(
             kIsEmailMFAEnabled,
             userDetails.profileData!.isEmailMFAEnabled,
           );
+          _ensureUserDetailsSession(sessionUserId, sessionToken);
           await _preferences.setBool(
             kCanDisableEmailMFA,
             userDetails.profileData!.canDisableEmailMFA,
           );
+          _ensureUserDetailsSession(sessionUserId, sessionToken);
         }
         if (userDetails.email != _config.getEmail()) {
-          await setEmail(userDetails.email);
+          await _config.setEmail(userDetails.email);
+          _ensureUserDetailsSession(sessionUserId, sessionToken);
+          emailValueNotifier.value = userDetails.email;
         }
       }
+      _ensureUserDetailsSession(sessionUserId, sessionToken);
       return userDetails;
     } catch (e) {
       _logger.warning("Failed to fetch", e);
+      _ensureUserDetailsSession(sessionUserId, sessionToken);
       if (e is DioException && e.response?.statusCode == 401) {
         throw UnauthorizedError();
       } else {
         rethrow;
       }
     }
+  }
+
+  void _ensureUserDetailsSession(int? userId, String? token) {
+    if (_config.getUserID() == userId && _config.getToken() == token) {
+      return;
+    }
+    throw DioException(
+      requestOptions: RequestOptions(path: "/users/details/v2"),
+      type: DioExceptionType.cancel,
+      message: "User details response belongs to a stale account session",
+    );
   }
 
   UserDetails? getCachedUserDetails() {
