@@ -1,22 +1,36 @@
 import { blobCache } from "ente-base/blob-cache";
 import type { EnteFile } from "ente-media/file";
+import { metadataHash } from "ente-media/file-metadata";
 import { fetchRenderableEnteFileBlob } from "./blob";
 import type { Box, FaceIndex } from "./face";
 import { clamp } from "./math";
 
 const inFlightBodyCropBlobs = new Map<string, Promise<Blob>>();
 
-/** Return a cached body crop, generating and caching it once per body ID. */
+/** Return a cached body crop, generating and caching it once per source revision. */
 export const bodyCropBlob = async (
     bodyID: string,
     file: EnteFile,
     box: Box,
 ): Promise<Blob> => {
+    // A file ID can receive new content after an update. Keep its crop cache
+    // entry tied to the source hash when available, and otherwise to the file
+    // revision timestamp. The box is part of the key because one body can be
+    // requested with a refined detection box.
+    const sourceRevision = metadataHash(file.metadata) ?? file.updationTime;
+    const cacheKey = `body-crop:${JSON.stringify([
+        bodyID,
+        sourceRevision,
+        box.x,
+        box.y,
+        box.width,
+        box.height,
+    ])}`;
     const cache = await blobCache("face-crops");
-    const cached = await cache.get(bodyID);
+    const cached = await cache.get(cacheKey);
     if (cached) return cached;
 
-    let inFlight = inFlightBodyCropBlobs.get(bodyID);
+    let inFlight = inFlightBodyCropBlobs.get(cacheKey);
     if (!inFlight) {
         inFlight = (async () => {
             const bitmap = await createImageBitmap(
@@ -24,20 +38,20 @@ export const bodyCropBlob = async (
             );
             try {
                 const crop = await extractFaceCrop(bitmap, box);
-                await cache.put(bodyID, crop);
+                await cache.put(cacheKey, crop);
                 return crop;
             } finally {
                 bitmap.close();
             }
         })();
-        inFlightBodyCropBlobs.set(bodyID, inFlight);
+        inFlightBodyCropBlobs.set(cacheKey, inFlight);
     }
 
     try {
         return await inFlight;
     } finally {
-        if (inFlightBodyCropBlobs.get(bodyID) === inFlight)
-            inFlightBodyCropBlobs.delete(bodyID);
+        if (inFlightBodyCropBlobs.get(cacheKey) === inFlight)
+            inFlightBodyCropBlobs.delete(cacheKey);
     }
 };
 
