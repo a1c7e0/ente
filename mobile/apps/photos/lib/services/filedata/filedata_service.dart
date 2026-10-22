@@ -10,6 +10,7 @@ import "package:photos/db/files_db.dart";
 import "package:photos/db/ml/db.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/gateways/files/file_data_gateway.dart";
+import "package:photos/main.dart" show isProcessBg;
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/clip.dart";
 import "package:photos/models/ml/ml_versions.dart";
@@ -17,6 +18,8 @@ import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/model/enc_file_data.dart";
 import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/filedata/model/response.dart";
+import "package:photos/services/machine_learning/ml_process_lock.dart";
+import "package:photos/services/machine_learning/ml_run_control.dart";
 import "package:photos/utils/file_key.dart";
 import "package:photos/utils/gzip.dart";
 import "package:photos/utils/ml_util.dart" show facesFromRemoteMLData;
@@ -31,6 +34,7 @@ class FileDataService {
   final FileDataGateway _gateway;
   late Map<int, PreviewInfo> previewIds;
   Future<void>? _syncFDStatusFuture;
+  MlRunControl? _metadataSyncControl;
 
   FileDataService(this._prefs, this._gateway) {
     _logger.info("FileDataService constructor called");
@@ -77,13 +81,20 @@ class FileDataService {
     FileDataEntity? initialData,
   }) => _updateFileData(file, update, type: type, initialData: initialData);
 
-  // Resets sometimes need to write a partial (or empty) metadata map, which
-  // normal indexing deliberately rejects in FileDataEntity.validate().
+  // Reset operations may write an empty ML map. Keep normal indexing writes
+  // validated while allowing resets to preserve unknown or non-ML metadata.
   Future<FileDataEntity> updateFileDataAllowingPartialMetadata(
     EnteFile file,
     FutureOr<bool> Function(FileDataEntity) update, {
     DataType type = DataType.mlData,
-  }) => _updateFileData(file, update, type: type, allowPartialMetadata: true);
+    FileDataEntity? initialData,
+  }) => _updateFileData(
+    file,
+    update,
+    type: type,
+    allowPartialMetadata: true,
+    initialData: initialData,
+  );
 
   Future<FileDataEntity> _updateFileData(
     EnteFile file,
@@ -184,13 +195,16 @@ class FileDataService {
     );
   }
 
-  Future<void> syncFDStatus() {
+  Future<void> syncFDStatus({bool mlLockHeld = false, MlRunControl? control}) {
     final existing = _syncFDStatusFuture;
     if (existing != null) {
       _logger.info("syncFDStatus already running, joining existing run");
       return existing;
     }
-    final future = _syncFDStatusInternal();
+    final future = _syncFDStatusInternal(
+      mlLockHeld: mlLockHeld,
+      control: control,
+    );
     _syncFDStatusFuture = future;
     return future.whenComplete(() {
       if (identical(_syncFDStatusFuture, future)) {
@@ -199,7 +213,10 @@ class FileDataService {
     });
   }
 
-  Future<void> _syncFDStatusInternal() async {
+  Future<void> _syncFDStatusInternal({
+    required bool mlLockHeld,
+    MlRunControl? control,
+  }) async {
     if (isLocalGalleryMode) {
       _logger.fine("Skipping file data sync in local gallery mode");
       return;
@@ -208,8 +225,10 @@ class FileDataService {
     try {
       bool hasMoreData = false;
       do {
+        if (control?.stopRequested ?? false) return;
         final lastTime = _prefs.getInt("fd.lastSyncTime") ?? 0;
         final res = await _gateway.getStatusDiff(lastUpdatedAt: lastTime);
+        if (control?.stopRequested ?? false) return;
         final data = (res["diff"] ?? []) as List;
         final List<FDStatus> result = [];
         int maxUpdatedAt = lastTime;
@@ -226,7 +245,13 @@ class FileDataService {
         previewIds = await MLDataDB.instance.getFileIDsVidPreview();
       } while (hasMoreData);
       try {
-        if (await _syncMLData(initialCursor: previousStatusCursor)) {
+        final didChange = mlLockHeld
+            ? await _syncMLDataWhileLocked(
+                initialCursor: previousStatusCursor,
+                control: control,
+              )
+            : await _syncMLDataWithLock(initialCursor: previousStatusCursor);
+        if (didChange) {
           Bus.instance.fire(PeopleChangedEvent());
         }
       } catch (e, s) {
@@ -245,12 +270,62 @@ class FileDataService {
     }
   }
 
-  Future<bool> _syncMLData({required int initialCursor}) async {
+  Future<bool> _syncMLDataWhileLocked({
+    required int initialCursor,
+    MlRunControl? control,
+  }) {
+    assert(
+      MlProcessLock.instance.isBusy,
+      "ML metadata hydration requires the ML process lock",
+    );
+    return _syncMLData(initialCursor: initialCursor, control: control);
+  }
+
+  Future<bool> _syncMLDataWithLock({required int initialCursor}) async {
+    var changed = false;
+    final control = MlRunControl();
+    final attempt = await MlProcessLock.instance.tryRunExclusive(
+      MlOperation.metadataSync,
+      () async {
+        _metadataSyncControl = control;
+        try {
+          changed = await _syncMLData(
+            initialCursor: initialCursor,
+            control: control,
+          );
+        } finally {
+          if (identical(_metadataSyncControl, control)) {
+            _metadataSyncControl = null;
+          }
+        }
+      },
+      background: isProcessBg,
+    );
+    if (attempt != MlLockAttempt.ran) {
+      _logger.info(
+        "Skipping ML metadata hydration because the process lock was denied "
+        "(${attempt.name}); it will retry on a later sync",
+      );
+      return false;
+    }
+    return changed;
+  }
+
+  void stopMetadataSync(MlStopReason reason) {
+    _metadataSyncControl?.requestStop(reason);
+  }
+
+  Future<bool> _syncMLData({
+    required int initialCursor,
+    MlRunControl? control,
+  }) async {
     if (!hasGrantedMLConsent || !localSettings.remoteFetchEnabled) return false;
     bool changed = false;
     while (true) {
+      if (control?.stopRequested ?? false) return changed;
       final since = _prefs.getInt("ml.fd.lastSyncTime") ?? initialCursor;
       final response = await _gateway.getStatusDiff(lastUpdatedAt: since);
+      if (control?.stopRequested ?? false) return changed;
       final diff = (response["diff"] ?? []) as List;
       if (diff.isEmpty) return changed;
       final existing = await MLDataDB.instance.bodyIndexes();
@@ -271,12 +346,15 @@ class FileDataService {
           .map((s) => s.fileID)
           .toList();
       for (int start = 0; start < ids.length; start += 200) {
+        if (control?.stopRequested ?? false) return changed;
         final end = start + 200 < ids.length ? start + 200 : ids.length;
         final fetched = await getFilesData(ids.sublist(start, end).toSet());
+        if (control?.stopRequested ?? false) return changed;
         if (fetched.fetchErrorFileIDs.isNotEmpty) {
           throw StateError("ML metadata fetch failed");
         }
         for (final entity in fetched.data.values) {
+          if (control?.stopRequested ?? false) return changed;
           final remoteFaces = facesFromRemoteMLData(entity);
           if (remoteFaces != null && faces.containsKey(entity.fileID)) {
             final local =
@@ -321,6 +399,7 @@ class FileDataService {
           }
         }
       }
+      if (control?.stopRequested ?? false) return changed;
       final deleted = statuses
           .where((s) => s.isDeleted && s.type == DataType.mlData.value)
           .map((s) => s.fileID)

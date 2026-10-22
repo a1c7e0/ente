@@ -185,6 +185,7 @@ class BodyRecognitionService {
         data.entries.every((e) => _rawIndexes[e.key] == e.value)) {
       return _parsedIndexes;
     }
+
     final result = <int, BodyIndex>{};
     for (final entry in data.entries) {
       try {

@@ -418,7 +418,7 @@ class _PeopleSelectionActionWidgetState
       firstButtonLabel: context.strings.yesResetPerson,
       firstButtonOnTap: () async {
         try {
-          await PersonService.instance.deletePerson(person.remoteID);
+          await PersonService.instance.resetPerson(person.remoteID);
           widget.selectedPeople.clearAll();
         } on Exception catch (e, s) {
           _logger.severe('Failed to delete person', e, s);

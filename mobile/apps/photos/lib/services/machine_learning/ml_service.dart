@@ -16,6 +16,7 @@ import "package:photos/events/app_mode_changed_event.dart";
 import "package:photos/events/compute_control_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/main.dart";
+import "package:photos/models/file/extensions/file_props.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/file/file_type.dart";
 import "package:photos/models/ml/clip.dart";
@@ -31,6 +32,7 @@ import "package:photos/services/machine_learning/face_ml/person/person_service.d
 import "package:photos/services/machine_learning/ml_exceptions.dart";
 import "package:photos/services/machine_learning/ml_indexing_isolate.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
+import "package:photos/services/machine_learning/ml_photo_reset_service.dart";
 import "package:photos/services/machine_learning/ml_process_lock.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/machine_learning/ml_run_control.dart";
@@ -334,8 +336,9 @@ class MLService {
     return canFetch;
   }
 
-  Future<void> _sync() async {
-    await fileDataService.syncFDStatus();
+  Future<void> _sync({required MlRunControl control}) async {
+    await fileDataService.syncFDStatus(mlLockHeld: true, control: control);
+    if (control.stopRequested) return;
     await PersonService.instance.sync();
   }
 
@@ -456,7 +459,7 @@ class MLService {
       if (remoteSyncOnly && mode == MLMode.localGallery) {
         return MlRunDisposition.completed;
       }
-      await _sync();
+      await _sync(control: control);
       if (control.stopRequested) {
         _logRunStopped(control, "after sync");
         return MlRunDisposition.stopped;
@@ -599,6 +602,7 @@ class MLService {
     for (final control in _runControls.toList(growable: false)) {
       control.requestStop(reason);
     }
+    fileDataService.stopMetadataSync(reason);
   }
 
   Future<MlLockAttempt> fetchAndIndexAllImages({required MLMode mode}) async {
@@ -614,6 +618,109 @@ class MLService {
       );
     }
     return attempt;
+  }
+
+  /// Recalculates all supported ML indexes for one uploaded photo using the
+  /// same persistence path as the regular indexing flow.
+  Future<bool> recalculateFile(EnteFile file) => recalculateFiles([file]);
+
+  /// Recalculates selected uploaded photos using the existing ML pipeline.
+  Future<bool> recalculateFiles(List<EnteFile> files) async {
+    final byID = <int, EnteFile>{
+      for (final file in files)
+        if (file.isOwner && file.uploadedFileID != null)
+          file.uploadedFileID!: file,
+    };
+    if (isLocalGalleryMode ||
+        byID.isEmpty ||
+        !hasGrantedMLConsent ||
+        !localSettings.isMLLocalIndexingEnabled) {
+      return false;
+    }
+
+    final control = MlRunControl();
+    var processed = false;
+    var allProcessed = true;
+    final attempt = await _runExclusiveWithControl(
+      MlOperation.indexing,
+      control,
+      () async {
+        if (!hasGrantedMLConsent || control.stopRequested) return;
+        await _sync(control: control);
+        if (control.stopRequested) return;
+
+        await MLModelDownloadService.instance.ensureModelsDownloaded(
+          onlyIndexingModels: true,
+        );
+        if (!MLModelDownloadService.instance.areIndexingModelsDownloaded ||
+            control.stopRequested) {
+          return;
+        }
+
+        final reset = await MLPhotoResetService.instance.reset(
+          byID.values.toList(),
+        );
+        if (reset.resetPhotoCount != byID.length || control.stopRequested) {
+          return;
+        }
+
+        await MLIndexingIsolate.instance.prepareRustRuntime();
+        try {
+          final selectedFiles = byID.values.toList();
+          for (
+            var start = 0;
+            start < selectedFiles.length;
+            start += fileDownloadMlLimit
+          ) {
+            if (control.stopRequested) {
+              allProcessed = false;
+              break;
+            }
+            final end = start + fileDownloadMlLimit < selectedFiles.length
+                ? start + fileDownloadMlLimit
+                : selectedFiles.length;
+            final batch = selectedFiles.sublist(start, end);
+            final outcomes = await Future.wait(
+              batch.map((file) {
+                return _processImage(
+                  FileMLInstruction(
+                    file: file,
+                    mode: MLMode.enteGallery,
+                    shouldRunFaces: true,
+                    shouldRunClip: true,
+                    shouldRunPets:
+                        flagService.petEnabled &&
+                        localSettings.petRecognitionEnabled,
+                    shouldRunBodies: true,
+                  ),
+                );
+              }),
+            );
+            processed = outcomes.any((result) => result) || processed;
+            allProcessed = outcomes.every((result) => result) && allProcessed;
+          }
+          if (processed) {
+            if (!control.stopRequested &&
+                await _dbForMode(MLMode.enteGallery).getUnclusteredFaceCount() >
+                    0) {
+              await _clusterAllImages(control: control);
+            }
+            if (!control.stopRequested) {
+              await PersonService.instance.sync();
+            }
+            magicCacheService.queueUpdate('fileIndexed');
+            Bus.instance.fire(PeopleChangedEvent());
+          }
+        } finally {
+          await MLIndexingIsolate.instance.releaseRustRuntime();
+          MLModelDownloadService.instance.invalidateModelDownloadCache();
+        }
+      },
+      // Manual re-calculation should wait behind an active ML run instead of
+      // being dropped because the shared process lock is busy.
+      lockWait: const Duration(minutes: 10),
+    );
+    return attempt == MlLockAttempt.ran && processed && allProcessed;
   }
 
   Future<void> _fetchAndIndexAllImages({

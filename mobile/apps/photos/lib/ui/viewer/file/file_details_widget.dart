@@ -228,9 +228,9 @@ class _FileDetailsWidgetState extends State<FileDetailsWidget> {
       fileDetailsTiles.addAll([
         MenuGroupComponent(
           items: [
-            if (mlDetectionDiagnosticsEnabled)
+            if (localSettings.showMLDebugOptions)
               MenuComponent(
-                title: "ML detections (test build)",
+                title: "ML detections",
                 onTap: () async {
                   await Navigator.of(context).push(
                     MaterialPageRoute(

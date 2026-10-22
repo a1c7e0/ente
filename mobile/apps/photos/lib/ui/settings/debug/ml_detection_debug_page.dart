@@ -20,9 +20,6 @@ import "package:photos/src/rust/api/ml_indexing_api.dart" as rust;
 import "package:photos/ui/settings/debug/ml_detection_preview.dart";
 import "package:photos/utils/ml_util.dart";
 
-// Opt in at build time; do not enable internal-user flags or change normal ML.
-const mlDetectionDiagnosticsEnabled = bool.fromEnvironment("enteMLDiagnostics");
-
 class MLDetectionDebugPage extends StatefulWidget {
   final EnteFile file;
 
