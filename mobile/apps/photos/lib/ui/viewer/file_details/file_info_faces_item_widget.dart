@@ -29,6 +29,7 @@ import "package:photos/ui/components/buttons/button_widget.dart";
 import "package:photos/ui/components/models/button_type.dart";
 import "package:photos/ui/viewer/file_details/file_info_face_widget.dart";
 import "package:photos/ui/viewer/people/add_files_to_person_page.dart";
+import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/file_face_widget.dart";
 import "package:photos/ui/viewer/people/people_page.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
@@ -57,6 +58,7 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
   List<_FaceInfo> _remainingFaces = [];
   List<PersonEntity> _manualPersons = [];
   Map<String, BodyMatch> _automaticBodies = {};
+  Map<String, BodyMatch> _automaticClusterBodies = {};
   NoFacesReason? _errorReason;
   late final StreamSubscription<PeopleChangedEvent> _peopleChangedEvent;
 
@@ -78,7 +80,7 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
     }
 
     try {
-      if (isRefresh) {
+      if (isRefresh && !isLocalGalleryMode) {
         await PersonService.instance.refreshPersonCache();
       }
       final result = await _fetchFaceData();
@@ -134,8 +136,9 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
     }
 
     final hasFaceData = _defaultFaces.isNotEmpty || _remainingFaces.isNotEmpty;
-    final hasManual = _manualPersons.isNotEmpty;
-    if (!hasFaceData && !hasManual) {
+    final hasManualOrBody =
+        _manualPersons.isNotEmpty || _automaticClusterBodies.isNotEmpty;
+    if (!hasFaceData && !hasManualOrBody) {
       return _buildNoFacesWidget();
     }
 
@@ -168,7 +171,7 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
 
     for (final person in _manualPersons) {
       children.add(
-        _ManualPersonTag(
+        _PersonOrClusterTag(
           key: ValueKey(person.remoteID),
           person: person,
           thumbnailWidth: thumbnailWidth,
@@ -176,6 +179,23 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
           isEditMode: _isEditMode,
           onRemove: () => _onRemoveManualPerson(person),
           bodyID: _automaticBodies[person.remoteID]?.detection.bodyID,
+          bodyFile: widget.file,
+        ),
+      );
+    }
+
+    for (final entry in _automaticClusterBodies.entries) {
+      final clusterID = entry.key;
+      children.add(
+        _PersonOrClusterTag(
+          key: ValueKey("cluster:$clusterID"),
+          thumbnailWidth: thumbnailWidth,
+          onTap: () => _openClusterPage(clusterID),
+          isEditMode: _isEditMode,
+          onRemove: isLocalGalleryMode
+              ? null
+              : () => _onRemoveBodyFromCluster(clusterID),
+          bodyID: entry.value.detection.bodyID,
           bodyFile: widget.file,
         ),
       );
@@ -629,14 +649,17 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
         ? <String, PersonEntity>{}
         : await PersonService.instance.getPersonsMap();
     _automaticBodies = {};
+    _automaticClusterBodies = {};
     if (!isLocalGallery) {
       for (final match in await BodyRecognitionService.instance.matches(
         await SearchService.instance.getAllFilesForSearch(),
       )) {
-        if (match.automatic &&
-            match.fileID == fileKey &&
-            persons.containsKey(match.personID)) {
+        if (!match.automatic || match.fileID != fileKey) continue;
+        if (persons.containsKey(match.personID)) {
           _automaticBodies[match.personID] = match;
+        } else if (match.personID.startsWith("cluster:")) {
+          _automaticClusterBodies[match.personID.substring("cluster:".length)] =
+              match;
         }
       }
     }
@@ -813,6 +836,46 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
     }
   }
 
+  Future<void> _onRemoveBodyFromCluster(String clusterID) async {
+    final result = await showChoiceActionSheet(
+      context,
+      title: context.strings.removePersonTag,
+      body: context.strings.areYouSureRemoveThisPersonTag,
+      firstButtonLabel: context.strings.remove,
+      firstButtonType: ButtonType.critical,
+      secondButtonLabel: context.strings.cancel,
+      isCritical: true,
+    );
+    if (result?.action != ButtonAction.first || isLocalGalleryMode) return;
+    try {
+      await BodyRecognitionService.instance.rejectClusterMembership(
+        widget.file,
+        clusterID,
+      );
+      await loadFaces(isRefresh: true);
+    } catch (e, s) {
+      _logger.severe('Error removing body match from unnamed cluster', e, s);
+    }
+  }
+
+  Future<void> _openClusterPage(String clusterID) async {
+    final allFiles = await SearchService.instance.getAllFilesForSearch();
+    final files = await BodyRecognitionService.instance.filesForCluster(
+      clusterID,
+      allFiles,
+    );
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ClusterPage(
+          files,
+          clusterID: clusterID,
+          showNamingBanner: !isLocalGalleryMode,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openPersonPage(PersonEntity person) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -850,32 +913,35 @@ class _FaceInfo {
   });
 }
 
-class _ManualPersonTag extends StatelessWidget {
+class _PersonOrClusterTag extends StatelessWidget {
   final String? bodyID;
   final EnteFile? bodyFile;
-  final PersonEntity person;
+  final PersonEntity? person;
   final double thumbnailWidth;
   final VoidCallback onTap;
   final bool isEditMode;
   final VoidCallback? onRemove;
 
-  const _ManualPersonTag({
+  const _PersonOrClusterTag({
     super.key,
-    required this.person,
+    this.person,
     required this.thumbnailWidth,
     required this.onTap,
     this.isEditMode = false,
     this.onRemove,
     this.bodyID,
     this.bodyFile,
-  });
+  }) : assert(person != null || bodyID != null),
+       assert(bodyID == null || bodyFile != null);
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = getEnteColorScheme(context);
-    final displayName = person.data.isIgnored
+    final displayName = person == null
+        ? ""
+        : person!.data.isIgnored
         ? '(' + context.strings.ignored + ')'
-        : person.data.name.trim();
+        : person!.data.name.trim();
 
     return Semantics(
       button: true,
@@ -901,7 +967,7 @@ class _ManualPersonTag extends StatelessWidget {
                       child: bodyID != null
                           ? FileFaceWidget(bodyFile!, clusterID: bodyID)
                           : PersonFaceWidget(
-                              personId: person.remoteID,
+                              personId: person!.remoteID,
                               keepAlive: true,
                             ),
                     ),

@@ -1481,14 +1481,26 @@ class SearchService {
         }
       }
 
+      final faceClusterSizes = {
+        for (final entry in clusterIdToFiles.entries)
+          entry.key: entry.value.length,
+      };
       for (final match in await BodyRecognitionService.instance.matches(
         uploadedIdToFile.values.toList(),
       )) {
-        if (!match.automatic || !personIdToPerson.containsKey(match.personID)) {
-          continue;
-        }
+        if (!match.automatic) continue;
         final file = uploadedIdToFile[match.fileID];
         if (file == null) continue;
+        if (match.personID.startsWith("cluster:")) {
+          final clusterID = match.personID.substring("cluster:".length);
+          final members = clusterIdToFiles[clusterID];
+          if (members != null &&
+              !members.any((member) => member.uploadedFileID == match.fileID)) {
+            members.add(file);
+          }
+          continue;
+        }
+        if (!personIdToPerson.containsKey(match.personID)) continue;
         final ids = personIdToFileIds.putIfAbsent(
           match.personID,
           () => <int>{},
@@ -1612,7 +1624,7 @@ class SearchService {
               );
             }
           }
-          if (files.length < minClusterSize) continue;
+          if ((faceClusterSizes[clusterId] ?? 0) < minClusterSize) continue;
           facesResult.add(
             GenericSearchResult(
               ResultType.faces,

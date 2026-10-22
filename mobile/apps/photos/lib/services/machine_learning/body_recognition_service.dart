@@ -14,11 +14,10 @@ import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
-import "package:photos/services/machine_learning/face_thumbnail_generator.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
 import "package:photos/services/search_service.dart";
 import "package:photos/src/rust/api/ml_indexing_api.dart" as rust;
-import "package:photos/utils/ml_util.dart";
+import "package:photos/utils/face/face_thumbnail_cache.dart";
 
 class BodyRecognitionService {
   static final instance = BodyRecognitionService._();
@@ -29,6 +28,8 @@ class BodyRecognitionService {
   int _indexRevision = 0;
   String? _matchKey;
   List<BodyMatch> _matches = const [];
+  String? _groupMatchKey;
+  List<BodyGroup> _groups = const [];
 
   Future<BodyIndex> analyze(int fileID, String path, List<Face> faces) async {
     final result = await rust.analyzeBodiesRust(
@@ -82,6 +83,82 @@ class BodyRecognitionService {
   Future<void> store(IMLDataDB<int> db, int fileID, BodyIndex index) =>
       db.putBodyIndex(fileID, jsonEncode(index.toJson()), index.version);
 
+  void invalidateCaches() {
+    _rawIndexes = {};
+    _parsedIndexes = {};
+    _indexRevision++;
+    _matchKey = null;
+    _matches = const [];
+    _groupMatchKey = null;
+    _groups = const [];
+  }
+
+  Future<bool> resetReviewData(
+    EnteFile file, {
+    required String? localBodyJson,
+  }) async {
+    final fileID = file.uploadedFileID;
+    if (fileID == null) return false;
+
+    var remoteChanged = false;
+    final updated = await fileDataService.updateFileDataAllowingPartialMetadata(
+      file,
+      (latest) {
+        final raw = latest.remoteRawData["body"];
+        if (raw is! Map) return false;
+        final body = Map<String, dynamic>.from(raw);
+        final cleared = clearBodyReviewData(body);
+        if (jsonEncode(cleared) == jsonEncode(body)) return false;
+        latest.remoteRawData["body"] = cleared;
+        remoteChanged = true;
+        return true;
+      },
+    );
+
+    final remoteBody = updated.remoteRawData["body"];
+    Map<String, dynamic>? body;
+    if (remoteBody is Map) {
+      body = clearBodyReviewData(Map<String, dynamic>.from(remoteBody));
+    } else if (localBodyJson != null) {
+      final localBody = jsonDecode(localBodyJson);
+      if (localBody is Map<String, dynamic>) {
+        body = clearBodyReviewData(localBody);
+      }
+    }
+
+    var localChanged = false;
+    if (body != null && BodyIndex.tryParse(body) != null) {
+      final encoded = jsonEncode(body);
+      localChanged = encoded != localBodyJson;
+      if (localChanged) {
+        await MLDataDB.instance.putBodyIndex(
+          fileID,
+          encoded,
+          (body["version"] as num).toInt(),
+        );
+      }
+    }
+    invalidateCaches();
+    return remoteChanged || localChanged;
+  }
+
+  Future<bool> clearBodyIndex(
+    EnteFile file, {
+    required String? localBodyJson,
+  }) async {
+    final fileID = file.uploadedFileID;
+    if (fileID == null) return false;
+
+    var remoteChanged = false;
+    await fileDataService.updateFileDataAllowingPartialMetadata(file, (latest) {
+      remoteChanged = latest.remoteRawData.remove("body") != null;
+      return remoteChanged;
+    });
+    await MLDataDB.instance.deleteBodyIndexes([fileID]);
+    invalidateCaches();
+    return remoteChanged || localBodyJson != null;
+  }
+
   Future<void> publish(
     IMLDataDB<int> db,
     EnteFile file,
@@ -121,39 +198,43 @@ class BodyRecognitionService {
     _rawIndexes = data;
     _parsedIndexes = result;
     _indexRevision++;
+    _groupMatchKey = null;
     return result;
   }
 
-  void invalidateCaches() {
-    _rawIndexes = {};
-    _parsedIndexes = {};
-    _indexRevision++;
-    _matchKey = null;
-    _matches = const [];
-  }
+  Future<Map<int, EnteFile>> filesByKey(List<EnteFile> files) async => {
+    for (final file in files)
+      if (file.uploadedFileID != null) file.uploadedFileID!: file,
+  };
 
   Future<List<BodyMatch>> matches(List<EnteFile> files) async {
+    // Local-gallery mode keeps inference and storage, without body matching.
+    if (isLocalGalleryMode) return [];
+    final db = MLDataDB.instance;
     final indices = await indexes();
-    if (indices.isEmpty) return [];
-    final persons = await PersonService.instance.getPersonsMap();
+    if (indices.isEmpty) {
+      _matchKey = null;
+      _matches = const [];
+      return [];
+    }
     final facePersons = <String, String>{};
+    final persons = await PersonService.instance.getPersonsMap();
     for (final person in persons.values) {
-      for (final faceID in await MLDataDB.instance.getFaceIDsForPerson(
-        person.remoteID,
-      )) {
+      for (final faceID in await db.getFaceIDsForPerson(person.remoteID)) {
         facePersons[faceID] = person.remoteID;
       }
     }
-    final clusters = await MLDataDB.instance.getAllClusterIdToFaceIDs();
+    final clusters = await db.getAllClusterIdToFaceIDs();
     for (final cluster in clusters.entries) {
       for (final faceID in cluster.value) {
         facePersons.putIfAbsent(faceID, () => "cluster:${cluster.key}");
       }
     }
+    final keyedFiles = await filesByKey(files);
     final times = {
-      for (final file in files)
-        if (file.uploadedFileID != null && file.creationTime != null)
-          file.uploadedFileID!: file.creationTime!,
+      for (final entry in keyedFiles.entries)
+        if (entry.value.creationTime != null)
+          entry.key: entry.value.creationTime!,
     };
     final timeKeys = times.keys.toList()..sort();
     final faceKeys = facePersons.keys.toList()..sort();
@@ -175,12 +256,97 @@ class BodyRecognitionService {
     return _matches;
   }
 
-  Future<List<BodyGroup>> groups(List<EnteFile> files) async =>
-      groupBodyMatches(await matches(files), {
-        for (final f in files)
-          if (f.uploadedFileID != null && f.creationTime != null)
-            f.uploadedFileID!: f.creationTime!,
+  Future<List<BodyGroup>> groups(List<EnteFile> files) async {
+    final matchesForFiles = await matches(files);
+    final matchKey = _matchKey;
+    if (isLocalGalleryMode || matchKey == null) {
+      _groups = const [];
+      _groupMatchKey = null;
+      return _groups;
+    }
+    if (_groupMatchKey != matchKey) {
+      final keyedFiles = await filesByKey(files);
+      _groups = groupBodyMatches(matchesForFiles, {
+        for (final entry in keyedFiles.entries)
+          if (entry.value.creationTime != null)
+            entry.key: entry.value.creationTime!,
       });
+      _groupMatchKey = matchKey;
+    }
+    return _groups;
+  }
+
+  Future<List<EnteFile>> filesForCluster(
+    String clusterID,
+    List<EnteFile> files,
+  ) async {
+    final db = MLDataDB.instance;
+    final clusterFiles = await db.getFileIdToClusterIds();
+    final keyedFiles = await filesByKey(files);
+    final ids = {
+      for (final entry in clusterFiles.entries)
+        if (entry.value.contains(clusterID)) entry.key,
+      for (final match in await matches(files))
+        if (match.automatic && match.personID == "cluster:$clusterID")
+          match.fileID,
+    };
+    return [
+      for (final id in ids)
+        if (keyedFiles.containsKey(id)) keyedFiles[id]!,
+    ];
+  }
+
+  /// Keep an unnamed-cluster rejection meaningful after naming or re-clustering.
+  /// Local cluster IDs are not shared identities, so metadata references faces.
+  Future<bool> rejectClusterMembership(EnteFile file, String clusterID) async =>
+      (await rejectClusterMemberships([file], clusterID)).isNotEmpty;
+
+  Future<List<EnteFile>> rejectClusterMemberships(
+    List<EnteFile> selectedFiles,
+    String clusterID,
+  ) async {
+    if (isLocalGalleryMode) {
+      throw StateError("Cluster editing requires an Ente account");
+    }
+    final selected = {
+      for (final file in selectedFiles)
+        if (file.uploadedFileID != null) file.uploadedFileID!: file,
+    };
+    if (selected.isEmpty) return [];
+    final files = await SearchService.instance.getAllFilesForSearch();
+    final rejectedBodies = (await matches(files))
+        .where(
+          (match) =>
+              match.automatic &&
+              selected.containsKey(match.fileID) &&
+              match.personID == "cluster:$clusterID",
+        )
+        .toList();
+    if (rejectedBodies.isEmpty) return [];
+    final faces = (await MLDataDB.instance.getFaceIDsForCluster(
+      clusterID,
+    )).toSet();
+    final anchors = {
+      for (final index in (await indexes()).values)
+        for (final body in index.detections)
+          if (faces.contains(body.linkedFaceID)) body.linkedFaceID!,
+    };
+    if (anchors.isEmpty) return [];
+    for (final match in rejectedBodies) {
+      await _updateBody(selected[match.fileID]!, match.detection.bodyID, (
+        body,
+      ) {
+        body.raw["rejectedAnchorFaceIDs"] = {
+          ...body.rejectedAnchorFaceIDs,
+          ...anchors,
+        }.toList()..sort();
+      });
+    }
+    return [
+      for (final id in rejectedBodies.map((match) => match.fileID).toSet())
+        selected[id]!,
+    ];
+  }
 
   Future<List<(int, BodyDetection)>> groupMembers(String reference) async {
     final all = await indexes();
@@ -529,15 +695,38 @@ class BodyRecognitionService {
     await updateDecision(file, bodyID, person.remoteID, null);
   }
 
-  Future<Map<int, Uint8List?>> crop(EnteFile file, String bodyID) async {
-    final index = (await indexes())[file.uploadedFileID];
+  Future<Map<int, Uint8List?>> crop(
+    EnteFile file,
+    String reference, {
+    bool useFullFile = true,
+  }) async {
+    final fileID = file.uploadedFileID;
+    if (fileID == null) return {};
+    final index = (await indexes())[fileID];
     if (index == null) return {};
-    final members = await groupMembers(bodyID);
-    final body = members.firstWhere((m) => m.$1 == file.uploadedFileID).$2;
-    final crops = await FaceThumbnailGenerator.instance.generateFaceThumbnails(
-      await getImagePathForML(file),
-      [body.box],
-    );
-    return {file.uploadedFileID!: crops.first};
+    BodyDetection? body;
+    for (final detection in index.detections) {
+      if (detection.bodyID == reference || detection.groupID == reference) {
+        body = detection;
+        break;
+      }
+    }
+    if (body == null) {
+      // Reuse suggestion membership for rendering. Feedback still resolves and
+      // validates the current group before changing any assignments.
+      if (_groupMatchKey == _matchKey && _matchKey != null) {
+        for (final group in _groups) {
+          if (group.id != reference) continue;
+          for (final match in group.matches) {
+            if (match.fileID == fileID) body = match.detection;
+          }
+        }
+      }
+      body ??= (await groupMembers(
+        reference,
+      )).firstWhere((member) => member.$1 == fileID).$2;
+    }
+    final crops = await getCachedBodyCrop(file, body, useFullFile: useFullFile);
+    return {fileID: crops?[body.bodyID]};
   }
 }

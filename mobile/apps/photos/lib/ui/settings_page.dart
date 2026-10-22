@@ -172,7 +172,9 @@ class _SettingsBody extends StatelessWidget {
             ),
             if (hasLoggedIn &&
                 !isLocalGalleryMode &&
-                (flagService.flags.internalUser || kDebugMode)) ...[
+                (flagService.flags.internalUser ||
+                    kDebugMode ||
+                    const bool.fromEnvironment("enteDeveloperTools"))) ...[
               _buildMenuItem(
                 title: "Debug",
                 icon: HugeIcons.strokeRoundedBug02,

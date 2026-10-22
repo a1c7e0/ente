@@ -22,6 +22,8 @@ class BodyDetection {
   final Map<String, dynamic> decisions;
   final Map<String, dynamic> raw;
   String? get groupID => raw["groupID"] as String?;
+  List<String> get rejectedAnchorFaceIDs =>
+      (raw["rejectedAnchorFaceIDs"] as List?)?.cast<String>() ?? const [];
 
   void bindReviewGroup(String reference) {
     final id = reference.startsWith("body-group:")
@@ -54,12 +56,16 @@ class BodyDetection {
     final decisions = Map<String, dynamic>.from(
       json["decisions"] as Map? ?? {},
     );
+    final rejectedAnchors = json["rejectedAnchorFaceIDs"];
     if (!bodyID.startsWith("body:") ||
         (groupID != null &&
             (groupID is! String || !groupID.startsWith("body-group:"))) ||
         !score.isFinite ||
         score < 0 ||
         score > 1 ||
+        (rejectedAnchors != null &&
+            (rejectedAnchors is! List ||
+                rejectedAnchors.any((id) => id is! String))) ||
         decisions.values.any(
           (d) =>
               d is! Map ||
@@ -147,6 +153,22 @@ class BodyIndex {
     "detections": detections.map((d) => d.toJson()).toList(),
     "embeddingPrecision": bodyEmbeddingPrecision,
   };
+}
+
+Map<String, dynamic> clearBodyReviewData(Map<String, dynamic> body) {
+  final cleaned = Map<String, dynamic>.from(body);
+  final detections = body["detections"];
+  if (detections is! List) return cleaned;
+
+  cleaned["detections"] = detections.map((detection) {
+    if (detection is! Map) return detection;
+    final cleanedDetection = Map<String, dynamic>.from(detection);
+    cleanedDetection.remove("groupID");
+    cleanedDetection.remove("rejectedAnchorFaceIDs");
+    cleanedDetection["decisions"] = <String, dynamic>{};
+    return cleanedDetection;
+  }).toList();
+  return BodyIndex.tryParse(cleaned)?.toJson() ?? cleaned;
 }
 
 double bodyCosine(List<double> a, List<double> b) {
@@ -271,6 +293,10 @@ List<BodyMatch> matchBodyDetections(
       }
       if (facePersons.containsKey(body.linkedFaceID)) continue;
       final scores = <String, double>{};
+      final rejectedPersons = {
+        for (final faceID in body.rejectedAnchorFaceIDs)
+          if (facePersons.containsKey(faceID)) facePersons[faceID]!,
+      };
       for (final anchor in anchors) {
         final anchorTime = times[anchor.$1];
         if (anchorTime == null ||
@@ -287,7 +313,10 @@ List<BodyMatch> matchBodyDetections(
         ..sort((a, b) => b.value.compareTo(a.value));
       if (ranked.isEmpty || ranked.first.value < 0.63) continue;
       final best = ranked.first;
-      if (body.decisions.containsKey(best.key)) continue;
+      if (body.decisions.containsKey(best.key) ||
+          rejectedPersons.contains(best.key)) {
+        continue;
+      }
       matches.add(
         BodyMatch(
           entry.key,

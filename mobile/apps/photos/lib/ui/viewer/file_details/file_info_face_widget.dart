@@ -13,6 +13,7 @@ import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
+import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/face_detection/detection.dart";
 import "package:photos/services/machine_learning/face_ml/face_filtering/face_filtering_constants.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
@@ -221,10 +222,10 @@ class _FileInfoFaceWidgetState extends State<FileInfoFaceWidget> {
         widget.clusterID ??
         await mlDataDB.getClusterIDForFaceID(widget.face.faceID);
     if (clusterID != null) {
-      final fileIdsToClusterIds = await mlDataDB.getFileIdToClusterIds();
       final files = await SearchService.instance.getAllFilesForSearch();
       List<EnteFile> clusterFiles;
       if (isLocalGalleryMode) {
+        final fileIdsToClusterIds = await mlDataDB.getFileIdToClusterIds();
         final localIntIds = fileIdsToClusterIds.keys.toSet();
         final localIdMap = await OfflineFilesDB.instance.getLocalIdsForIntIds(
           localIntIds,
@@ -247,15 +248,10 @@ class _FileInfoFaceWidgetState extends State<FileInfoFaceWidget> {
           }
         }
       } else {
-        clusterFiles = files
-            .where(
-              (file) =>
-                  fileIdsToClusterIds[file.uploadedFileID]?.contains(
-                    clusterID,
-                  ) ??
-                  false,
-            )
-            .toList();
+        clusterFiles = await BodyRecognitionService.instance.filesForCluster(
+          clusterID,
+          files,
+        );
       }
       if (!mounted) return;
       await Navigator.of(context).push(

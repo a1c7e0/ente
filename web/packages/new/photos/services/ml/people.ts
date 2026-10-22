@@ -116,6 +116,15 @@ export const reconstructPeopleState = async (): Promise<PeopleState> => {
 
     const cgroups = await savedCGroups();
     const bodyMatches = await currentBodyMatches(normalCollectionFiles);
+    const bodyFileIDsByClusterID = new Map<string, Set<number>>();
+    for (const match of bodyMatches) {
+        if (!isAutomaticBodyMatch(match)) continue;
+        const clusterID = clusterIDFromBodyPersonID(match.personID);
+        if (!clusterID) continue;
+        const fileIDs = bodyFileIDsByClusterID.get(clusterID) ?? new Set();
+        fileIDs.add(match.fileID);
+        bodyFileIDsByClusterID.set(clusterID, fileIDs);
+    }
     const cgroupPeople: Interim = cgroups.map((cgroup) => {
         const { id, data } = cgroup;
         const { name, assigned } = data;
@@ -191,12 +200,17 @@ export const reconstructPeopleState = async (): Promise<PeopleState> => {
         const mostRecentFace = faces[0];
         if (!mostRecentFace) return undefined;
 
+        const fileIDs = new Set(faces.map((f) => f.file.id));
+        for (const fileID of bodyFileIDsByClusterID.get(cluster.id) ?? []) {
+            if (fileByID.has(fileID)) fileIDs.add(fileID);
+        }
+
         return {
             type: "cluster",
             cluster,
             id: cluster.id,
             name: undefined,
-            fileIDs: [...new Set(faces.map((f) => f.file.id))],
+            fileIDs: [...fileIDs],
             displayFaceID: mostRecentFace.faceID,
             displayFaceFile: mostRecentFace.file,
             isPinned: false,
@@ -244,6 +258,11 @@ export const reconstructPeopleState = async (): Promise<PeopleState> => {
 
     return { people, visiblePeople, personByFaceID };
 };
+
+const clusterIDFromBodyPersonID = (personID: string) =>
+    personID.startsWith("cluster:")
+        ? personID.slice("cluster:".length)
+        : undefined;
 
 // Older mobile clients stored avatarFileID in this field.
 const resolvedAvatarFaceID = (avatarFaceID: string | undefined) =>

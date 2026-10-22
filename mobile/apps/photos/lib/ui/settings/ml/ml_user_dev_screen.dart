@@ -3,20 +3,15 @@ import "dart:async";
 import "package:ente_components/ente_components.dart";
 import "package:flutter/material.dart";
 import "package:logging/logging.dart";
-import "package:photos/core/event_bus.dart";
-import "package:photos/db/ml/base.dart";
-import "package:photos/db/ml/db.dart";
-import "package:photos/events/people_changed_event.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/machine_learning/face_ml/face_clustering/face_clustering_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
-import "package:photos/services/machine_learning/semantic_search/semantic_search_service.dart";
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/components/buttons/button_widget.dart";
 import "package:photos/ui/components/models/button_type.dart";
 import "package:photos/ui/components/settings/settings_grouped_card.dart";
 import "package:photos/ui/components/toggle_switch_widget.dart";
-import "package:photos/ui/notification/toast.dart";
+import "package:photos/ui/settings/ml/ml_debug_actions.dart";
 import "package:photos/utils/dialog_util.dart";
 
 final Logger _logger = Logger("MLUserDeveloperOptions");
@@ -30,7 +25,6 @@ class MLUserDeveloperOptions extends StatefulWidget {
 }
 
 class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
-  late final IMLDataDB<int> mlDataDB = MLDataDB.instance;
   static const double _autoMergeMin = 0.01;
   static const double _autoMergeMax = 0.35;
   static const double _clusteringMin = 0.10;
@@ -114,7 +108,7 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
                 buttonType: ButtonType.neutral,
                 labelText: "Purge empty indices",
                 onTap: () async {
-                  await deleteEmptyIndices(context);
+                  await purgeEmptyMLIndices(context);
                 },
               )
             : const SizedBox(),
@@ -124,7 +118,7 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
                 buttonType: ButtonType.neutral,
                 labelText: "Reset all local ML",
                 onTap: () async {
-                  await deleteAllLocalML(context);
+                  await resetAllLocalML(context);
                 },
               )
             : const SizedBox(),
@@ -195,34 +189,6 @@ class _MLUserDeveloperOptionsState extends State<MLUserDeveloperOptions> {
         const SizedBox(height: 12),
       ],
     );
-  }
-
-  Future<void> deleteEmptyIndices(BuildContext context) async {
-    try {
-      final Set<int> emptyFileIDs = await mlDataDB.getErroredFileIDs();
-      await mlDataDB.deleteFaceIndexForFiles(emptyFileIDs.toList());
-      await mlDataDB.deleteClipEmbeddings(emptyFileIDs.toList());
-      if (!context.mounted) return;
-      showShortToast(context, "Deleted ${emptyFileIDs.length} entries");
-    } catch (e) {
-      if (!context.mounted) return;
-      // ignore: unawaited_futures
-      showGenericErrorDialog(context: context, error: e);
-    }
-  }
-
-  Future<void> deleteAllLocalML(BuildContext context) async {
-    try {
-      await mlDataDB.dropClustersAndPersonTable(faces: true);
-      await SemanticSearchService.instance.clearIndexes();
-      Bus.instance.fire(PeopleChangedEvent());
-      if (!context.mounted) return;
-      showShortToast(context, "All local ML cleared");
-    } catch (e) {
-      if (!context.mounted) return;
-      // ignore: unawaited_futures
-      showGenericErrorDialog(context: context, error: e);
-    }
   }
 
   Widget _buildThresholdsCard(BuildContext context) {

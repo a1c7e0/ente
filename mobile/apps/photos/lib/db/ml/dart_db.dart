@@ -97,12 +97,15 @@ class DartMLDataDB
     final cached = _bodyIndexesCache;
     if (cached != null) {
       final versions = _bodyIndexVersionCache!;
-      if (cached.keys.every((fileID) => versions[fileID]! >= minimumVersion)) {
+      if (cached.keys.every(
+        (fileID) => versions[fileID]! >= minimumVersion,
+      )) {
         return cached;
       }
       return {
         for (final entry in cached.entries)
-          if (versions[entry.key]! >= minimumVersion) entry.key: entry.value,
+          if (versions[entry.key]! >= minimumVersion)
+            entry.key: entry.value,
       };
     }
     final rows = await (await asyncDB).getAll(
@@ -311,7 +314,9 @@ class DartMLDataDB
   }
 
   @override
-  Future<Set<String>> getBadFaceSingletonClusterIDs() async {
+  Future<Set<String>> getBadFaceSingletonClusterIDs({
+    bool includeSideways = true,
+  }) async {
     final db = await asyncDB;
     final rows = await db.getAll('''
       SELECT fc.$clusterIDColumn, f.$faceScore, f.$faceBlur, f.$isSideways
@@ -326,9 +331,12 @@ class DartMLDataDB
       final badFace = isBadFaceForClustering(
         faceScore: row[faceScore] as double,
         blurValue: row[faceBlur] as double,
-        isSideways: (row[isSideways] as int) == 1,
+        isSideways: includeSideways && (row[isSideways] as int) == 1,
       );
-      if (badFace) {
+      // Re-admitted profile reviews must still pass the strict indexing gate.
+      if (badFace ||
+          (!includeSideways &&
+              (row[faceScore] as double) <= kMinimumQualityFaceScore)) {
         badClusterIDs.add(row[clusterIDColumn] as String);
       }
     }
