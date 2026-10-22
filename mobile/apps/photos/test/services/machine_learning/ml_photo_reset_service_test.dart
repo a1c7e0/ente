@@ -12,6 +12,8 @@ import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/filedata/model/response.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_photo_reset_service.dart";
+import "package:photos/utils/face/face_thumbnail_cache.dart"
+    show checkUsedFaceIDForPersonOrClusterId, putFaceIdCachedForPersonOrCluster;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -184,6 +186,73 @@ void main() {
         },
         "future": 7,
       });
+    },
+  );
+
+  test(
+    "ML resets evict warmed mappings when DB rows are already gone",
+    () async {
+      for (final fullReset in [false, true]) {
+        final fileID = fullReset ? 11 : 10;
+        final personID = "named-$fileID";
+        final clusterID = "cluster-$fileID";
+        final db = _MemoryMLDB()
+          ..faces[fileID] = [_face(fileID)]
+          ..clusterByFace[_faceID(fileID)] = clusterID;
+        final persons = _MemoryPersons([
+          _person(
+            personID,
+            clusters: {
+              clusterID: {_faceID(fileID)},
+            },
+          ),
+        ]);
+        await putFaceIdCachedForPersonOrCluster(
+          personID,
+          "old-person-face-$fileID",
+          db: db,
+        );
+        await putFaceIdCachedForPersonOrCluster(
+          clusterID,
+          "old-cluster-face-$fileID",
+          db: db,
+        );
+
+        // The mapping rows can be removed independently while the process LRU
+        // still serves the previous avatar face IDs.
+        await db.removeFaceIdCachedForPersonOrCluster(personID);
+        await db.removeFaceIdCachedForPersonOrCluster(clusterID);
+        expect(
+          await checkUsedFaceIDForPersonOrClusterId(personID, db: db),
+          "old-person-face-$fileID",
+        );
+        expect(
+          await checkUsedFaceIDForPersonOrClusterId(clusterID, db: db),
+          "old-cluster-face-$fileID",
+        );
+
+        final service = _service(
+          db,
+          persons,
+          _MemoryMetadata({
+            fileID: {"face": 1},
+          }),
+        );
+        if (fullReset) {
+          await service.reset([_file(fileID)]);
+        } else {
+          await service.resetPersonBindings([_file(fileID)]);
+        }
+
+        expect(
+          await checkUsedFaceIDForPersonOrClusterId(personID, db: db),
+          isNull,
+        );
+        expect(
+          await checkUsedFaceIDForPersonOrClusterId(clusterID, db: db),
+          isNull,
+        );
+      }
     },
   );
 
@@ -467,6 +536,7 @@ class _MemoryMLDB implements IMLDataDB<int> {
   final Map<int, String> body = {};
   final Map<String, String> clusterByFace = {};
   final Map<String, Set<String>> rejected = {};
+  final Map<String, String> cachedFaceIDs = {};
   final Set<(String, String)> removedClusterAssignments = {};
   final Set<String> invalidatedFaceCaches = {};
   final List<List<int>> deletedFaceFiles = [];
@@ -515,7 +585,19 @@ class _MemoryMLDB implements IMLDataDB<int> {
     String personOrClusterID,
   ) async {
     invalidatedFaceCaches.add(personOrClusterID);
+    cachedFaceIDs.remove(personOrClusterID);
   }
+
+  @override
+  Future<String?> getFaceIdUsedForPersonOrCluster(
+    String personOrClusterId,
+  ) async => cachedFaceIDs[personOrClusterId];
+
+  @override
+  Future<void> putFaceIdCachedForPersonOrCluster(
+    String personOrClusterId,
+    String faceID,
+  ) async => cachedFaceIDs[personOrClusterId] = faceID;
 
   @override
   Future<void> deleteClusterSummary(String clusterID) async {}

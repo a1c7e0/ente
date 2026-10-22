@@ -87,8 +87,12 @@ class _PersonFaceWidgetState extends State<PersonFaceWidget>
     _peopleChangedSubscription = Bus.instance.on<PeopleChangedEvent>().listen((
       event,
     ) {
-      if (mounted && isPerson && event.person?.remoteID == widget.personId) {
-        setState(() => faceCropFuture = _startFaceCropLoad());
+      if (mounted &&
+          (event.person == null ||
+              (isPerson && event.person?.remoteID == widget.personId))) {
+        setState(() {
+          faceCropFuture = _startFaceCropLoad();
+        });
       }
     });
     faceCropFuture = _startFaceCropLoad();

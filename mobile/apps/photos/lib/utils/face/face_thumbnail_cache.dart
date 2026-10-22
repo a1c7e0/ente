@@ -7,6 +7,7 @@ import "package:flutter/foundation.dart";
 import "package:logging/logging.dart";
 import "package:photos/core/cache/lru_map.dart";
 import "package:photos/db/files_db.dart";
+import "package:photos/db/ml/base.dart";
 import "package:photos/db/ml/db.dart";
 import "package:photos/db/offline_files_db.dart";
 import "package:photos/models/file/file.dart";
@@ -82,15 +83,16 @@ Future<bool> areFullFaceCropsCached(
 }
 
 Future<String?> checkUsedFaceIDForPersonOrClusterId(
-  String personOrClusterID,
-) async {
+  String personOrClusterID, {
+  IMLDataDB<int>? db,
+}) async {
   final String? cachedFaceID = _personOrClusterIdToCachedFaceID.get(
     personOrClusterID,
   );
   if (cachedFaceID != null) return cachedFaceID;
-  final mlDataDB = isLocalGalleryMode
-      ? MLDataDB.localGalleryInstance
-      : MLDataDB.instance;
+  final mlDataDB =
+      db ??
+      (isLocalGalleryMode ? MLDataDB.localGalleryInstance : MLDataDB.instance);
   final String? faceIDFromDB = await mlDataDB.getFaceIdUsedForPersonOrCluster(
     personOrClusterID,
   );
@@ -102,11 +104,12 @@ Future<String?> checkUsedFaceIDForPersonOrClusterId(
 
 Future<void> putFaceIdCachedForPersonOrCluster(
   String personOrClusterID,
-  String faceID,
-) async {
-  final mlDataDB = isLocalGalleryMode
-      ? MLDataDB.localGalleryInstance
-      : MLDataDB.instance;
+  String faceID, {
+  IMLDataDB<int>? db,
+}) async {
+  final mlDataDB =
+      db ??
+      (isLocalGalleryMode ? MLDataDB.localGalleryInstance : MLDataDB.instance);
   await mlDataDB.putFaceIdCachedForPersonOrCluster(personOrClusterID, faceID);
   _personOrClusterIdToCachedFaceID.put(personOrClusterID, faceID);
 }
@@ -123,18 +126,15 @@ Future<void> _putCachedCropForFaceID(
 }
 
 Future<void> checkRemoveCachedFaceIDForPersonOrClusterId(
-  String personOrClusterID,
-) async {
-  final mlDataDB = isLocalGalleryMode
-      ? MLDataDB.localGalleryInstance
-      : MLDataDB.instance;
-  final String? cachedFaceID = await mlDataDB.getFaceIdUsedForPersonOrCluster(
-    personOrClusterID,
-  );
-  if (cachedFaceID != null) {
-    _personOrClusterIdToCachedFaceID.remove(personOrClusterID);
-    await mlDataDB.removeFaceIdCachedForPersonOrCluster(personOrClusterID);
-  }
+  String personOrClusterID, {
+  IMLDataDB<int>? db,
+}) async {
+  // Evict memory first even when the persisted row has already been removed.
+  _personOrClusterIdToCachedFaceID.remove(personOrClusterID);
+  final mlDataDB =
+      db ??
+      (isLocalGalleryMode ? MLDataDB.localGalleryInstance : MLDataDB.instance);
+  await mlDataDB.removeFaceIdCachedForPersonOrCluster(personOrClusterID);
 }
 
 // Pass personOrClusterID only when every face belongs to that person or cluster.

@@ -15,6 +15,8 @@ import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
+import "package:photos/utils/face/face_thumbnail_cache.dart"
+    show checkRemoveCachedFaceIDForPersonOrClusterId;
 
 class MLPhotoResetResult {
   final int resetPhotoCount;
@@ -352,10 +354,10 @@ class MLPhotoResetService {
 
     for (final entry in detachedClusters) {
       await db.removeClusterToPerson(personID: entry.$1, clusterID: entry.$2);
-      await db.removeFaceIdCachedForPersonOrCluster(entry.$2);
+      await checkRemoveCachedFaceIDForPersonOrClusterId(entry.$2, db: db);
     }
     for (final personID in touchedPersonIDs) {
-      await db.removeFaceIdCachedForPersonOrCluster(personID);
+      await checkRemoveCachedFaceIDForPersonOrClusterId(personID, db: db);
     }
     final selectedClusters = (await db.getFaceIdsToClusterIds(
       faceIDs,
@@ -420,7 +422,7 @@ class MLPhotoResetService {
       await db.removeClusterToPerson(personID: entry.$1, clusterID: entry.$2);
     }
     for (final personID in touchedPersonIDs) {
-      await db.removeFaceIdCachedForPersonOrCluster(personID);
+      await checkRemoveCachedFaceIDForPersonOrClusterId(personID, db: db);
     }
 
     await _clearRejectedClusters(
@@ -443,7 +445,7 @@ class MLPhotoResetService {
     }
     for (final clusterID in touchedClusters) {
       await db.deleteClusterSummary(clusterID);
-      await db.removeFaceIdCachedForPersonOrCluster(clusterID);
+      await checkRemoveCachedFaceIDForPersonOrClusterId(clusterID, db: db);
     }
     return touchedPersonIDs;
   }
