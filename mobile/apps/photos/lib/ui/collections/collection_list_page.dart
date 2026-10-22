@@ -57,6 +57,7 @@ class _CollectionListPageState extends State<CollectionListPage> {
   AlbumViewType? albumViewType;
   late AlbumSortDirection albumSortDirection;
   String _searchQuery = "";
+  int _refreshGeneration = 0;
   final _selectedAlbum = SelectedAlbums();
   late final ScrollController _scrollController;
 
@@ -260,45 +261,54 @@ class _CollectionListPageState extends State<CollectionListPage> {
   }
 
   Future<void> refreshCollections() async {
-    if (widget.sectionType == UISectionType.incomingCollections ||
-        widget.sectionType == UISectionType.outgoingCollections) {
+    final generation = ++_refreshGeneration;
+    final sectionType = widget.sectionType;
+    final searchQuery = _searchQuery;
+    final currentSortKey = sortKey;
+    final currentSortDirection = albumSortDirection;
+    List<Collection>? nextCollections = widget.collections;
+
+    if (sectionType == UISectionType.incomingCollections ||
+        sectionType == UISectionType.outgoingCollections) {
       final SharedCollections sharedCollections = await CollectionsService
           .instance
           .getSharedCollections();
-      if (widget.sectionType == UISectionType.incomingCollections) {
-        collections = sharedCollections.incoming;
+      if (sectionType == UISectionType.incomingCollections) {
+        nextCollections = sharedCollections.incoming;
       } else {
-        collections = sharedCollections.outgoing;
+        nextCollections = sharedCollections.outgoing;
       }
-    } else if (widget.sectionType == UISectionType.homeCollections) {
-      collections = await CollectionsService.instance
+    } else if (sectionType == UISectionType.homeCollections) {
+      nextCollections = await CollectionsService.instance
           .getCollectionForOnEnteSection();
-    } else if (widget.sectionType == UISectionType.archivedCollections) {
-      collections = await CollectionsService.instance.getArchivedCollection();
-    } else if (widget.sectionType == UISectionType.hiddenCollections) {
-      collections = CollectionsService.instance.getHiddenCollections(
+    } else if (sectionType == UISectionType.archivedCollections) {
+      nextCollections = await CollectionsService.instance
+          .getArchivedCollection();
+    } else if (sectionType == UISectionType.hiddenCollections) {
+      nextCollections = CollectionsService.instance.getHiddenCollections(
         includeDefaultHidden: false,
       );
     }
-    if (_searchQuery.isNotEmpty) {
-      collections = collections
+    if (searchQuery.isNotEmpty) {
+      nextCollections = nextCollections
           ?.where(
-            (c) => c.displayName.toLowerCase().contains(
-              _searchQuery.toLowerCase(),
-            ),
+            (c) =>
+                c.displayName.toLowerCase().contains(searchQuery.toLowerCase()),
           )
           .toList();
     }
-    if (widget.sectionType == UISectionType.archivedCollections ||
-        widget.sectionType == UISectionType.hiddenCollections) {
+    if ((sectionType == UISectionType.archivedCollections ||
+            sectionType == UISectionType.hiddenCollections) &&
+        nextCollections != null) {
       await CollectionsService.instance.sortCollectionsByAlbumPreferences(
-        collections!,
-        sortKey: sortKey,
-        sortDirection: albumSortDirection,
+        nextCollections,
+        sortKey: currentSortKey,
+        sortDirection: currentSortDirection,
       );
     }
-    if (mounted) {
-      setState(() {});
+    if (!mounted || generation != _refreshGeneration) {
+      return;
     }
+    setState(() => collections = nextCollections);
   }
 }

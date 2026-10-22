@@ -16,7 +16,7 @@ import 'package:photos/db/device_files_db.dart';
 import 'package:photos/db/files_db.dart';
 import "package:photos/db/ml/db.dart";
 import "package:photos/db/offline_files_db.dart";
-import 'package:photos/events/local_photos_updated_event.dart';
+import 'package:photos/events/files_updated_event.dart';
 import "package:photos/extensions/user_extension.dart";
 import "package:photos/models/api/collection/user.dart";
 import 'package:photos/models/collection/collection.dart';
@@ -76,22 +76,54 @@ class SearchService {
   Future<Map<int, EnteFile>>? _cachedFilesByUploadedID;
   final _logger = Logger((SearchService).toString());
   final _collectionService = CollectionsService.instance;
+  final Future<List<EnteFile>> Function()? _loadFilesForTesting;
   static const _maximumResultsLimit = 20;
   late final mlDataDB = MLDataDB.instance;
-  StreamSubscription<LocalPhotosUpdatedEvent>? _localPhotosUpdatedSubscription;
+  StreamSubscription<FilesUpdatedEvent>? _filesUpdatedSubscription;
 
-  SearchService._privateConstructor();
+  SearchService._privateConstructor() : _loadFilesForTesting = null;
+
+  @visibleForTesting
+  SearchService.forTesting({
+    required Future<List<EnteFile>> Function() loadFiles,
+  }) : _loadFilesForTesting = loadFiles;
 
   static final SearchService instance = SearchService._privateConstructor();
 
   void init() {
-    _localPhotosUpdatedSubscription?.cancel();
-    _localPhotosUpdatedSubscription = Bus.instance
-        .on<LocalPhotosUpdatedEvent>()
-        .listen((event) {
-          // Invalidate only; reload on demand.
-          _invalidateFileCaches();
-        });
+    _filesUpdatedSubscription?.cancel();
+    _filesUpdatedSubscription = Bus.instance.on<FilesUpdatedEvent>().listen((
+      event,
+    ) {
+      if (_shouldInvalidateFor(event)) {
+        // Invalidate only; reload on demand.
+        _invalidateFileCaches();
+      }
+    });
+  }
+
+  @visibleForTesting
+  Future<void> disposeForTesting() async {
+    await _filesUpdatedSubscription?.cancel();
+    _filesUpdatedSubscription = null;
+  }
+
+  bool _shouldInvalidateFor(FilesUpdatedEvent event) {
+    // These update collection decoration or people metadata, not file membership.
+    return event.type != EventType.coverChanged &&
+        event.type != EventType.peopleChanged &&
+        event.type != EventType.peopleClusterChanged;
+  }
+
+  Future<List<EnteFile>> _getAllFilesFromDB() {
+    final testLoader = _loadFilesForTesting;
+    if (testLoader != null) {
+      return testLoader();
+    }
+    return FilesDB.instance.getAllFilesFromDB(
+      ignoreCollections(),
+      dedupeByUploadId: false,
+    );
   }
 
   void _invalidateFileCaches() {
@@ -286,10 +318,7 @@ class SearchService {
 
     if (_cachedFilesFuture == null) {
       _logger.info("Reading all files from db");
-      _cachedFilesFuture = FilesDB.instance.getAllFilesFromDB(
-        ignoreCollections(),
-        dedupeByUploadId: false,
-      );
+      _cachedFilesFuture = _getAllFilesFromDB();
     }
 
     _cachedFilesForSearch = _cachedFilesFuture!.then((files) {
@@ -432,10 +461,7 @@ class SearchService {
 
     if (_cachedFilesFuture == null) {
       _logger.info("Reading all files from db");
-      _cachedFilesFuture = FilesDB.instance.getAllFilesFromDB(
-        ignoreCollections(),
-        dedupeByUploadId: false,
-      );
+      _cachedFilesFuture = _getAllFilesFromDB();
     }
 
     _cachedFilesForHierarchicalSearch = _cachedFilesFuture!.then((files) {
@@ -462,10 +488,7 @@ class SearchService {
 
     if (_cachedFilesFuture == null) {
       _logger.info("Reading all files from db");
-      _cachedFilesFuture = FilesDB.instance.getAllFilesFromDB(
-        ignoreCollections(),
-        dedupeByUploadId: false,
-      );
+      _cachedFilesFuture = _getAllFilesFromDB();
     }
 
     final filteredFiles = _cachedFilesFuture!.then((files) {

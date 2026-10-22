@@ -20,6 +20,7 @@ import 'package:photos/db/device_files_db.dart';
 import 'package:photos/db/files_db.dart';
 import 'package:photos/db/social_db.dart';
 import 'package:photos/db/trash_db.dart';
+import 'package:photos/events/collection_meta_event.dart';
 import 'package:photos/events/collection_updated_event.dart';
 import 'package:photos/events/contact_relationships_invalidated_event.dart';
 import 'package:photos/events/files_updated_event.dart';
@@ -73,7 +74,8 @@ class CollectionsService {
   late FilesDB _filesDB;
   late Configuration _config;
   late SharedPreferences _prefs;
-  StreamSubscription<CollectionUpdatedEvent>? _collectionUpdatedSubscription;
+  StreamSubscription<FilesUpdatedEvent>? _filesUpdatedSubscription;
+  StreamSubscription<CollectionMetaEvent>? _collectionMetaSubscription;
 
   final _localPathToCollectionID = <String, int>{};
   final _collectionIDToCollections = <int, Collection>{};
@@ -83,6 +85,17 @@ class CollectionsService {
   Future<Map<int, int>>? _collectionIDToNewestFileTime;
   final Map<String, EnteFile> _coverCache = <String, EnteFile>{};
   final Map<int, int> _countCache = <int, int>{};
+  int _newestFileTimeGeneration = 0;
+  int _globalDisplayCacheGeneration = 0;
+  final Map<int, int> _collectionDisplayCacheGenerations = {};
+  int _collectionMapGeneration = 0;
+
+  final Future<EnteFile?> Function(int collectionID, int uploadedFileID)?
+  _loadUploadedCover;
+  final Future<EnteFile?> Function(int collectionID, bool ascending)?
+  _loadCollectionCover;
+  final Future<int> Function(int collectionID)? _loadCollectionFileCount;
+  final Future<Map<int, int>> Function()? _loadNewestFileTimes;
 
   final _cachedPublicAlbumToken = <int, String>{};
   final _cachedPublicAlbumJWT = <int, String>{};
@@ -93,10 +106,41 @@ class CollectionsService {
   static const int _maxRecentlyUsedCollections = 3;
   final _recentlyUsedCollectionIDs = <int>[];
 
-  CollectionsService._privateConstructor() {
+  CollectionsService._privateConstructor({
+    Future<EnteFile?> Function(int collectionID, int uploadedFileID)?
+    loadUploadedCover,
+    Future<EnteFile?> Function(int collectionID, bool ascending)?
+    loadCollectionCover,
+    Future<int> Function(int collectionID)? loadCollectionFileCount,
+    Future<Map<int, int>> Function()? loadNewestFileTimes,
+  }) : _loadUploadedCover = loadUploadedCover,
+       _loadCollectionCover = loadCollectionCover,
+       _loadCollectionFileCount = loadCollectionFileCount,
+       _loadNewestFileTimes = loadNewestFileTimes {
     _db = CollectionsDB.instance;
     _filesDB = FilesDB.instance;
     _config = Configuration.instance;
+  }
+
+  @visibleForTesting
+  factory CollectionsService.forTesting({
+    required SharedPreferences preferences,
+    required Future<EnteFile?> Function(int collectionID, int uploadedFileID)
+    loadUploadedCover,
+    required Future<EnteFile?> Function(int collectionID, bool ascending)
+    loadCollectionCover,
+    required Future<int> Function(int collectionID) loadCollectionFileCount,
+    required Future<Map<int, int>> Function() loadNewestFileTimes,
+  }) {
+    final service = CollectionsService._privateConstructor(
+      loadUploadedCover: loadUploadedCover,
+      loadCollectionCover: loadCollectionCover,
+      loadCollectionFileCount: loadCollectionFileCount,
+      loadNewestFileTimes: loadNewestFileTimes,
+    );
+    service._prefs = preferences;
+    service._listenForFileUpdates();
+    return service;
   }
 
   static final CollectionsService instance =
@@ -104,28 +148,107 @@ class CollectionsService {
 
   Future<void> init(SharedPreferences preferences) async {
     _prefs = preferences;
+    _listenForFileUpdates();
+    final collectionMapGeneration = _collectionMapGeneration;
     final collections = await _db.getAllCollections();
 
+    if (collectionMapGeneration != _collectionMapGeneration) {
+      return;
+    }
     for (final collection in collections) {
       // using deprecated method because the path is stored in encrypted
       // format in the DB
       // ignore: deprecated_member_use_from_same_package
       _cacheCollectionAttributes(collection);
     }
-    if (_collectionUpdatedSubscription != null) {
-      await _collectionUpdatedSubscription!.cancel();
+  }
+
+  void _listenForFileUpdates() {
+    _filesUpdatedSubscription?.cancel();
+    _filesUpdatedSubscription = Bus.instance.on<FilesUpdatedEvent>().listen(
+      _onFilesUpdated,
+    );
+    _collectionMetaSubscription?.cancel();
+    _collectionMetaSubscription = Bus.instance.on<CollectionMetaEvent>().listen(
+      _onCollectionMetaUpdated,
+    );
+  }
+
+  void _onCollectionMetaUpdated(CollectionMetaEvent event) {
+    if (event.type != CollectionMetaEventType.sortChanged &&
+        event.type != CollectionMetaEventType.thumbnailChanged) {
+      return;
     }
-    _collectionUpdatedSubscription = Bus.instance
-        .on<CollectionUpdatedEvent>()
-        .listen((event) {
-          _collectionIDToNewestFileTime = null;
-          if (event.collectionID != null) {
-            _coverCache.removeWhere(
-              (key, value) => key.startsWith(event.collectionID!.toString()),
-            );
-            _countCache.remove(event.collectionID);
-          }
-        });
+    _collectionDisplayCacheGenerations.update(
+      event.id,
+      (generation) => generation + 1,
+      ifAbsent: () => 1,
+    );
+    final prefix = '${event.id}_';
+    _coverCache.removeWhere((key, _) => key.startsWith(prefix));
+  }
+
+  void _onFilesUpdated(FilesUpdatedEvent event) {
+    if (_deletesUploadedFilesEverywhere(event)) {
+      _invalidateAlbumDisplayCaches(invalidateAll: true);
+      return;
+    }
+    final collectionIDs = <int>{
+      for (final file in event.updatedFiles)
+        if (file.collectionID != null) file.collectionID!,
+    };
+    if (event is CollectionUpdatedEvent && event.collectionID != null) {
+      collectionIDs.add(event.collectionID!);
+    }
+    _invalidateAlbumDisplayCaches(
+      collectionIDs: collectionIDs,
+      invalidateAll: collectionIDs.isEmpty,
+    );
+  }
+
+  bool _deletesUploadedFilesEverywhere(FilesUpdatedEvent event) {
+    if (event.type == EventType.deletedFromEverywhere) {
+      return true;
+    }
+    if (event.type != EventType.deletedFromRemote) {
+      return false;
+    }
+    // These paths delete by uploaded ID across every album row. Other remote
+    // removals (including moveFrom) affect only their event's collection.
+    return event.source == 'deleteFromRemoteOnly' ||
+        event.source == 'mlStaleFileCleanup';
+  }
+
+  void _invalidateAlbumDisplayCaches({
+    Iterable<int> collectionIDs = const [],
+    bool invalidateAll = false,
+  }) {
+    _newestFileTimeGeneration++;
+    _collectionIDToNewestFileTime = null;
+    if (invalidateAll) {
+      _globalDisplayCacheGeneration++;
+      _coverCache.clear();
+      _countCache.clear();
+      return;
+    }
+    for (final collectionID in collectionIDs) {
+      _collectionDisplayCacheGenerations.update(
+        collectionID,
+        (generation) => generation + 1,
+        ifAbsent: () => 1,
+      );
+      final prefix = '${collectionID}_';
+      _coverCache.removeWhere((key, _) => key.startsWith(prefix));
+      _countCache.remove(collectionID);
+    }
+  }
+
+  @visibleForTesting
+  Future<void> disposeForTesting() async {
+    await _filesUpdatedSubscription?.cancel();
+    _filesUpdatedSubscription = null;
+    await _collectionMetaSubscription?.cancel();
+    _collectionMetaSubscription = null;
   }
 
   Configuration get config => _config;
@@ -216,9 +339,16 @@ class CollectionsService {
   }
 
   void clearCache() {
+    _newestFileTimeGeneration++;
+    _globalDisplayCacheGeneration++;
+    _collectionMapGeneration++;
     _localPathToCollectionID.clear();
     _collectionIDToCollections.clear();
+    _cachedUserIdToUser.clear();
     cachedDefaultHiddenCollection = null;
+    _collectionIDToNewestFileTime = null;
+    _coverCache.clear();
+    _countCache.clear();
     _cachedPublicAlbumToken.clear();
     _cachedPublicAlbumJWT.clear();
     _cachedPublicCollectionID.clear();
@@ -395,10 +525,28 @@ class CollectionsService {
         0;
   }
 
-  Future<Map<int, int>> getCollectionIDToNewestFileTime() {
-    _collectionIDToNewestFileTime ??= _filesDB
-        .getCollectionIDToMaxCreationTime();
-    return _collectionIDToNewestFileTime!;
+  Future<Map<int, int>> getCollectionIDToNewestFileTime() async {
+    while (true) {
+      final current = _collectionIDToNewestFileTime;
+      final generation = _newestFileTimeGeneration;
+      if (current != null) {
+        final result = await current;
+        if (generation == _newestFileTimeGeneration &&
+            identical(current, _collectionIDToNewestFileTime)) {
+          return result;
+        }
+        continue;
+      }
+      final future =
+          (_loadNewestFileTimes?.call() ??
+          _filesDB.getCollectionIDToMaxCreationTime());
+      _collectionIDToNewestFileTime = future;
+      final result = await future;
+      if (generation == _newestFileTimeGeneration &&
+          identical(future, _collectionIDToNewestFileTime)) {
+        return result;
+      }
+    }
   }
 
   Future<void> sortCollectionsByAlbumPreferences(
@@ -484,23 +632,36 @@ class CollectionsService {
     if (kDebugMode) {
       debugPrint("getCover for collection ${c.id} ${c.displayName}");
     }
-    if (c.hasCover) {
-      final coverID = c.pubMagicMetadata.coverID ?? 0;
-      final EnteFile? cover = await filesDB.getUploadedFile(coverID, c.id);
+    while (true) {
+      final globalGeneration = _globalDisplayCacheGeneration;
+      final collectionGeneration =
+          _collectionDisplayCacheGenerations[c.id] ?? 0;
+      EnteFile? cover;
+      if (c.hasCover) {
+        final coverID = c.pubMagicMetadata.coverID ?? 0;
+        cover =
+            await (_loadUploadedCover?.call(c.id, coverID) ??
+                filesDB.getUploadedFile(coverID, c.id));
+      }
+      cover ??=
+          await (_loadCollectionCover?.call(
+                c.id,
+                c.pubMagicMetadata.asc ?? false,
+              ) ??
+              filesDB.getCollectionFileFirstOrLast(
+                c.id,
+                c.pubMagicMetadata.asc ?? false,
+              ));
+      if (globalGeneration != _globalDisplayCacheGeneration ||
+          collectionGeneration !=
+              (_collectionDisplayCacheGenerations[c.id] ?? 0)) {
+        continue;
+      }
       if (cover != null) {
         _coverCache[coverKey] = cover;
-        return Future.value(cover);
       }
+      return cover;
     }
-    final coverFile = await filesDB.getCollectionFileFirstOrLast(
-      c.id,
-      c.pubMagicMetadata.asc ?? false,
-    );
-    if (coverFile != null) {
-      _coverCache[coverKey] = coverFile;
-      return Future.value(coverFile);
-    }
-    return null;
   }
 
   EnteFile? getCoverCache(Collection c) {
@@ -513,9 +674,21 @@ class CollectionsService {
     if (_countCache.containsKey(c.id) && useCache) {
       return _countCache[c.id]!;
     } else {
-      final count = await _filesDB.collectionFileCount(c.id);
-      _countCache[c.id] = count;
-      return count;
+      while (true) {
+        final globalGeneration = _globalDisplayCacheGeneration;
+        final collectionGeneration =
+            _collectionDisplayCacheGenerations[c.id] ?? 0;
+        final count =
+            await (_loadCollectionFileCount?.call(c.id) ??
+                _filesDB.collectionFileCount(c.id));
+        if (globalGeneration != _globalDisplayCacheGeneration ||
+            collectionGeneration !=
+                (_collectionDisplayCacheGenerations[c.id] ?? 0)) {
+          continue;
+        }
+        _countCache[c.id] = count;
+        return count;
+      }
     }
   }
 
