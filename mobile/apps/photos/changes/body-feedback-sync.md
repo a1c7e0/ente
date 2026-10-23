@@ -1,0 +1,1 @@
+- Save body review feedback locally first and synchronize it in the background, retaining unsent edits across restarts.

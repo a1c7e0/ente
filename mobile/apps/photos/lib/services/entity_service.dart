@@ -62,7 +62,43 @@ class EntityService {
     String? id,
     bool addWithCustomID = false,
     int? expectedUpdatedAt,
+  }) => _addOrUpdate(
+    type,
+    jsonMap,
+    id: id,
+    addWithCustomID: addWithCustomID,
+    expectedUpdatedAt: expectedUpdatedAt,
+  );
+
+  Future<LocalEntityData> addOrUpdateForSession(
+    EntityType type,
+    Map<String, dynamic> jsonMap, {
+    required String id,
+    required bool Function() isCurrentSession,
+    int? expectedUpdatedAt,
+  }) => _addOrUpdate(
+    type,
+    jsonMap,
+    id: id,
+    isCurrentSession: isCurrentSession,
+    expectedUpdatedAt: expectedUpdatedAt,
+  );
+
+  Future<LocalEntityData> _addOrUpdate(
+    EntityType type,
+    Map<String, dynamic> jsonMap, {
+    String? id,
+    bool addWithCustomID = false,
+    int? expectedUpdatedAt,
+    bool Function()? isCurrentSession,
   }) async {
+    void checkSession() {
+      if (isCurrentSession != null && !isCurrentSession()) {
+        throw StateError("Entity update belongs to a stale account session");
+      }
+    }
+
+    checkSession();
     final String plainText = jsonEncode(jsonMap);
     final key = await getOrCreateEntityKey(type);
     late String encryptedData, header;
@@ -85,6 +121,7 @@ class EntityService {
       " ${id == null ? 'Adding' : 'Updating'} entity of type: " + type.name,
     );
 
+    checkSession();
     final EntityData data = id == null || addWithCustomID
         ? await _gateway.createEntity(type, id, encryptedData, header)
         : await _gateway.updateEntity(
@@ -94,6 +131,7 @@ class EntityService {
             header,
             expectedUpdatedAt: expectedUpdatedAt,
           );
+    checkSession();
     final localData = LocalEntityData(
       id: data.id,
       type: type,
@@ -103,6 +141,7 @@ class EntityService {
     );
 
     await _db.upsertEntities([localData]);
+    checkSession();
     syncEntities().ignore();
     return localData;
   }

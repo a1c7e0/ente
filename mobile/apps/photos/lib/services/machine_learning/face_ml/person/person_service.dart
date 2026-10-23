@@ -3,6 +3,7 @@ import "dart:convert";
 import "dart:developer";
 
 import "package:computer/computer.dart";
+import "package:dio/dio.dart";
 import "package:ente_contacts/contacts.dart" as contacts;
 import "package:ente_pure_utils/ente_pure_utils.dart";
 import "package:flutter/foundation.dart";
@@ -10,6 +11,7 @@ import "package:logging/logging.dart";
 import "package:photos/core/configuration.dart";
 import "package:photos/core/event_bus.dart";
 import "package:photos/db/ml/base.dart";
+import "package:photos/db/ml/ml_exclusive_operation.dart";
 import "package:photos/events/diff_sync_complete_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/gateways/entity/models/type.dart";
@@ -20,6 +22,7 @@ import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/entity_service.dart";
 import "package:photos/services/machine_learning/body_person_reset_service.dart";
+import "package:photos/services/machine_learning/ml_process_lock.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/services/photos_contacts_service.dart";
 import "package:photos/settings/local_settings.dart";
@@ -590,10 +593,11 @@ class PersonService {
     Bus.instance.fire(PeopleChangedEvent());
   }
 
-  Future<void> resetPerson(String personID) async {
-    await BodyPersonResetService.instance.clearReviewData(personID);
-    await deletePerson(personID);
-  }
+  Future<void> resetPerson(String personID) =>
+      runMlOperationExclusive(MlOperation.clearData, () async {
+        await BodyPersonResetService.instance.clearReviewData(personID);
+        await deletePerson(personID);
+      });
 
   Future<bool> _pullAndApplyRemotePersons({
     bool skipClusterUpdateIfNoChange = true,
@@ -985,6 +989,42 @@ class PersonService {
     } catch (e, s) {
       logger.severe("Failed to update person", e, s);
       rethrow;
+    }
+  }
+
+  Future<void> setManualFileAssignmentForSession(
+    String personID,
+    int fileID,
+    bool assigned,
+    bool Function() isCurrentSession,
+  ) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!isCurrentSession()) {
+        throw StateError("Body feedback account session changed");
+      }
+      final entity = await entityService.getEntity(EntityType.cgroup, personID);
+      if (entity == null) throw StateError("Feedback person is unavailable");
+      final person = PersonData.fromJson(
+        jsonDecode(entity.data) as Map<String, dynamic>,
+      );
+      final manual = person.manuallyAssigned.toSet();
+      final changed = assigned ? manual.add(fileID) : manual.remove(fileID);
+      if (!changed) return;
+      try {
+        await entityService.addOrUpdateForSession(
+          EntityType.cgroup,
+          person.copyWith(manuallyAssigned: manual.toList()).toJson(),
+          id: personID,
+          expectedUpdatedAt: entity.updatedAt,
+          isCurrentSession: isCurrentSession,
+        );
+        _invalidatePersonCache();
+        return;
+      } on DioException catch (error) {
+        if (error.response?.statusCode != 409 || attempt == 2) rethrow;
+        if (!isCurrentSession()) rethrow;
+        if (await entityService.syncEntity(EntityType.cgroup) < 0) rethrow;
+      }
     }
   }
 

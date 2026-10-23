@@ -22,6 +22,8 @@ class BodyDetection {
   final Map<String, dynamic> decisions;
   final Map<String, dynamic> raw;
   String? get groupID => raw["groupID"] as String?;
+  List<String> get rejectedAnchorFaceIDs =>
+      (raw["rejectedAnchorFaceIDs"] as List?)?.cast<String>() ?? const [];
 
   void bindReviewGroup(String reference) {
     final id = reference.startsWith("body-group:")

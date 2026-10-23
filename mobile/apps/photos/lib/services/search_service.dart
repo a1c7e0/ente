@@ -53,6 +53,7 @@ import "package:photos/services/contacts/direct_contact_users.dart";
 import "package:photos/services/date_parse_service.dart";
 import "package:photos/services/filter/db_filters.dart";
 import "package:photos/services/location_service.dart";
+import "package:photos/services/machine_learning/body_feedback_service.dart";
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import 'package:photos/services/machine_learning/semantic_search/semantic_search_service.dart';
@@ -1255,11 +1256,15 @@ class SearchService {
     }
     final person = await PersonService.instance.getPerson(personID);
     if (person != null) {
+      final manualIDs = BodyFeedbackService.applyManualChanges(
+        person.data.manuallyAssigned,
+        (await BodyFeedbackService.instance.manualChanges())[personID],
+      );
       final fileByID = {for (final file in allFiles) file.uploadedFileID: file};
       for (final entry
           in (await BodyRecognitionService.instance.indexes()).entries) {
         final file = fileByID[entry.key];
-        if (file == null || !person.data.manuallyAssigned.contains(entry.key)) {
+        if (file == null || !manualIDs.contains(entry.key)) {
           continue;
         }
         for (final body in entry.value.detections) {
@@ -1298,7 +1303,10 @@ class SearchService {
     if (includeManualAssigned) {
       final person = await PersonService.instance.getPerson(personID);
       if (person != null) {
-        final manualIDs = person.data.manuallyAssigned.toSet();
+        final manualIDs = BodyFeedbackService.applyManualChanges(
+          person.data.manuallyAssigned,
+          (await BodyFeedbackService.instance.manualChanges())[personID],
+        );
         if (manualIDs.isNotEmpty) {
           for (final manualID in manualIDs) {
             if (addedFileIDs.contains(manualID)) {
@@ -1469,9 +1477,14 @@ class SearchService {
         }
       }
 
+      final bodyManualChanges = await BodyFeedbackService.instance
+          .manualChanges();
       for (final entry in personIdToPerson.entries) {
         final personID = entry.key;
-        final manualIDs = entry.value.data.manuallyAssigned.toSet();
+        final manualIDs = BodyFeedbackService.applyManualChanges(
+          entry.value.data.manuallyAssigned,
+          bodyManualChanges[personID],
+        );
         if (manualIDs.isEmpty) continue;
 
         final filesForPerson = personIdToFiles.putIfAbsent(
