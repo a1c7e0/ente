@@ -1,4 +1,4 @@
-import "dart:async" show StreamSubscription;
+import "dart:async";
 import "dart:math";
 
 import "package:ente_components/ente_components.dart";
@@ -8,18 +8,20 @@ import "package:flutter/material.dart";
 import "package:logging/logging.dart";
 import "package:photos/core/event_bus.dart";
 import "package:photos/db/ml/db.dart";
+import "package:photos/events/event.dart";
+import "package:photos/events/files_updated_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/person.dart";
 import 'package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart';
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
-import "package:photos/services/machine_learning/ml_result.dart";
 import "package:photos/theme/ente_theme.dart";
 import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/face_thumbnail_squircle.dart";
 import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/person_clusters_page.dart";
+import "package:photos/ui/viewer/people/review_suggestion_changes.dart";
 import "package:photos/ui/viewer/people/review_thumbnail.dart";
 import "package:photos/ui/viewer/people/review_thumbnail_loader.dart";
 import "package:photos/ui/viewer/people/save_or_edit_person.dart";
@@ -34,8 +36,20 @@ class SuggestionUserFeedback {
 
 class PersonReviewClusterSuggestion extends StatefulWidget {
   final PersonEntity person;
+  @visibleForTesting
+  final Future<List<ClusterSuggestion>> Function()? loadSuggestions;
+  @visibleForTesting
+  final Future<void> Function(ClusterSuggestion, bool)? saveFeedback;
+  @visibleForTesting
+  final ReviewThumbnailLoader Function(int count)? createThumbnailLoader;
 
-  const PersonReviewClusterSuggestion(this.person, {super.key});
+  const PersonReviewClusterSuggestion(
+    this.person, {
+    this.loadSuggestions,
+    this.saveFeedback,
+    this.createThumbnailLoader,
+    super.key,
+  });
 
   @override
   State<PersonReviewClusterSuggestion> createState() => _PersonClustersState();
@@ -45,11 +59,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   int currentSuggestionIndex = 0;
   Key futureBuilderKeySuggestions = UniqueKey();
   bool canGiveFeedback = false;
-  final _thumbnailLoader = ReviewThumbnailLoader(
-    6,
-    prefetchGroups: 5,
-    prefetchImageBudget: 8,
-  );
+  late ReviewThumbnailLoader _thumbnailLoader;
   ReviewThumbnails _currentThumbnails = {};
   int _suggestionLoadID = 0;
   bool _restoringSuggestion = false;
@@ -60,10 +70,21 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
 
   late Future<List<ClusterSuggestion>> futureClusterSuggestions;
   StreamSubscription<PeopleChangedEvent>? _peopleChangedEvent;
+  late final StreamSubscription<FilesUpdatedEvent> _filesUpdatedEvent;
+  bool _previewOpen = false;
+  bool _savingFeedback = false;
+  bool _suggestionsInvalidated = false;
 
   @override
   void initState() {
     super.initState();
+    _thumbnailLoader = _createThumbnailLoader();
+    _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen(
+      _onSuggestionChanged,
+    );
+    _filesUpdatedEvent = Bus.instance.on<FilesUpdatedEvent>().listen(
+      _onSuggestionChanged,
+    );
     _fetchClusterSuggestions();
   }
 
@@ -72,6 +93,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     _suggestionLoadID++;
     _thumbnailLoader.dispose();
     _peopleChangedEvent?.cancel();
+    _filesUpdatedEvent.cancel();
     super.dispose();
   }
 
@@ -104,8 +126,6 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
         builder: (context, snapshot) {
           if (snapshot.hasData) {
             if (snapshot.data!.isEmpty) {
-              _peopleChangedEvent?.cancel();
-              _peopleChangedEvent = null;
               return Center(
                 child: Text(
                   context.strings.noSuggestionsForPerson(
@@ -124,50 +144,38 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
             final bool usingMean = currentSuggestion.usedOnlyMeanForSuggestion;
             final List<EnteFile> files = currentSuggestion.filesInCluster;
 
-            _peopleChangedEvent?.cancel();
-            _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen((
-              event,
-            ) {
-              if (event.source == clusterID.toString()) {
-                if (event.type == PeopleEventType.removedFilesFromCluster) {
-                  for (var updatedFile in event.relevantFiles!) {
-                    files.remove(updatedFile);
-                  }
-                  setState(() {});
-                }
-                if (event.type == PeopleEventType.removedFaceFromCluster) {
-                  for (final String removedFaceID in event.relevantFaceIDs!) {
-                    final int fileID = getFileIdFromFaceId<int>(removedFaceID);
-                    files.removeWhere((file) => file.uploadedFileID == fileID);
-                  }
-                  setState(() {});
-                }
-              }
-            });
-
             return Column(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
                   child: SingleChildScrollView(
                     child: GestureDetector(
-                      onTap: () {
+                      onTap: () async {
+                        if (_savingFeedback) return;
                         final List<EnteFile> sortedFiles = List<EnteFile>.from(
                           currentSuggestion.filesInCluster,
                         );
                         sortedFiles.sort(
                           (a, b) => b.creationTime!.compareTo(a.creationTime!),
                         );
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => ClusterPage(
-                              sortedFiles,
-                              personID: widget.person,
-                              clusterID: clusterID,
-                              showNamingBanner: false,
-                            ),
-                          ),
-                        );
+                        _previewOpen = true;
+                        final result = await Navigator.of(context)
+                            .push<ClusterPageResult>(
+                              MaterialPageRoute(
+                                builder: (context) => ClusterPage(
+                                  sortedFiles,
+                                  personID: widget.person,
+                                  clusterID: clusterID,
+                                  showNamingBanner: false,
+                                ),
+                              ),
+                            );
+                        _previewOpen = false;
+                        if (mounted &&
+                            (_suggestionsInvalidated ||
+                                result == ClusterPageResult.ignoredPerson)) {
+                          _reloadSuggestions();
+                        }
                       },
                       behavior: HitTestBehavior.opaque,
                       child: Container(
@@ -293,40 +301,80 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     bool yesOrNo,
     int numberOfSuggestions,
   ) async {
-    if (!canGiveFeedback) return;
+    if (!canGiveFeedback || _savingFeedback) return;
     final suggestion = allSuggestions[currentSuggestionIndex];
-    setState(() => canGiveFeedback = false);
+    final previousIndex = currentSuggestionIndex;
+    final previousThumbnails = _currentThumbnails;
+    final loadID = _suggestionLoadID;
+    var preparedNext = false;
+    setState(() {
+      _savingFeedback = true;
+      canGiveFeedback = false;
+    });
     try {
-      if (yesOrNo) {
-        await ClusterFeedbackService.instance.addClusterToExistingPerson(
-          person: widget.person,
-          clusterID: clusterID,
-          bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
-        );
-      } else {
-        await ClusterFeedbackService.instance.rejectSuggestion(
-          personID: widget.person.remoteID,
-          clusterID: clusterID,
-          bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
-        );
-      }
-      if (!mounted) return;
+      final feedback = widget.saveFeedback != null
+          ? widget.saveFeedback!(suggestion, yesOrNo)
+          : yesOrNo
+          ? ClusterFeedbackService.instance.addClusterToExistingPerson(
+              person: widget.person,
+              clusterID: clusterID,
+              bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
+            )
+          : ClusterFeedbackService.instance.rejectSuggestion(
+              personID: widget.person.remoteID,
+              clusterID: clusterID,
+              bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
+            );
+      await Future.wait([
+        feedback,
+        () async {
+          if (previousIndex + 1 >= allSuggestions.length) return;
+          try {
+            await _prepareSuggestions(
+              allSuggestions,
+              previousIndex + 1,
+              loadID,
+            );
+            if (!mounted || loadID != _suggestionLoadID) return;
+            preparedNext = true;
+            setState(() => currentSuggestionIndex = previousIndex + 1);
+          } catch (error, stack) {
+            // An image failure must not turn a successful save into a failure.
+            // The ordinary preparation path below supplies the retry UI.
+            _logger.warning("Next review preview is unavailable", error, stack);
+          }
+        }(),
+      ], eagerError: true);
+      if (!mounted || loadID != _suggestionLoadID) return;
+      _savingFeedback = false;
       pastUserFeedback.add(SuggestionUserFeedback(yesOrNo, suggestion));
       _notifySuggestionReviewed();
-      if (yesOrNo) currentSuggestionIndex++;
-      if (!yesOrNo || currentSuggestionIndex >= numberOfSuggestions) {
-        setState(() {
-          currentSuggestionIndex = 0;
-          futureBuilderKeySuggestions = UniqueKey();
-          _fetchClusterSuggestions();
-        });
+      if (_suggestionsInvalidated ||
+          !yesOrNo ||
+          previousIndex + 1 >= numberOfSuggestions) {
+        _reloadSuggestions();
+      } else if (preparedNext) {
+        setState(() => canGiveFeedback = true);
       } else {
+        currentSuggestionIndex = previousIndex + 1;
         _prepareNextSuggestion();
       }
     } catch (error, stack) {
       _logger.severe("Error saving review feedback", error, stack);
-      if (!mounted) return;
-      setState(() => canGiveFeedback = true);
+      if (!mounted || loadID != _suggestionLoadID) return;
+      _suggestionLoadID++;
+      _savingFeedback = false;
+      if (_suggestionsInvalidated) {
+        _reloadSuggestions();
+        await showGenericErrorDialog(context: context, error: error);
+        return;
+      }
+      setState(() {
+        _savingFeedback = false;
+        currentSuggestionIndex = previousIndex;
+        _currentThumbnails = previousThumbnails;
+        canGiveFeedback = true;
+      });
       await showGenericErrorDialog(context: context, error: error);
     }
   }
@@ -402,18 +450,54 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     }
   }
 
+  void _onSuggestionChanged(Event event) {
+    if (!reviewSuggestionsAffectedBy(
+      event,
+      _savingFeedback
+          ? allSuggestions
+          : allSuggestions.skip(currentSuggestionIndex),
+      previewOpen: _previewOpen,
+    )) {
+      return;
+    }
+    _suggestionsInvalidated = true;
+    if (!_previewOpen && !_savingFeedback) {
+      _reloadSuggestions();
+    }
+  }
+
+  void _reloadSuggestions() {
+    _suggestionsInvalidated = false;
+    _restoringSuggestion = false;
+    _thumbnailLoader.dispose();
+    _thumbnailLoader = _createThumbnailLoader();
+    currentSuggestionIndex = 0;
+    _currentThumbnails = {};
+    setState(() {
+      futureBuilderKeySuggestions = UniqueKey();
+      _fetchClusterSuggestions();
+    });
+  }
+
+  ReviewThumbnailLoader _createThumbnailLoader() =>
+      widget.createThumbnailLoader?.call(6) ??
+      ReviewThumbnailLoader(6, prefetchGroups: 5, prefetchImageBudget: 8);
+
   void _fetchClusterSuggestions() {
     canGiveFeedback = false;
     final loadID = ++_suggestionLoadID;
-    futureClusterSuggestions = ClusterFeedbackService.instance
-        .getSuggestionForPerson(widget.person)
-        .then((suggestions) {
-          if (!mounted || loadID != _suggestionLoadID) {
-            return <ClusterSuggestion>[];
-          }
-          allSuggestions = suggestions;
-          return _prepareSuggestions(suggestions, 0, loadID);
-        });
+    futureClusterSuggestions =
+        (widget.loadSuggestions?.call() ??
+                ClusterFeedbackService.instance.getSuggestionForPerson(
+                  widget.person,
+                ))
+            .then((suggestions) {
+              if (!mounted || loadID != _suggestionLoadID) {
+                return <ClusterSuggestion>[];
+              }
+              allSuggestions = suggestions;
+              return _prepareSuggestions(suggestions, 0, loadID);
+            });
   }
 
   Future<List<ClusterSuggestion>> _prepareSuggestions(
@@ -438,7 +522,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
     final selected = suggestions.removeAt(selectedIndex);
     suggestions.insert(index, selected);
     _currentThumbnails = prepared.thumbnails;
-    canGiveFeedback = true;
+    canGiveFeedback = !_savingFeedback;
     _restoringSuggestion = false;
     _thumbnailLoader.prefetch(suggestions.skip(index + 1));
     return suggestions;

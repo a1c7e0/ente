@@ -4,6 +4,7 @@ import "package:ente_strings/ente_strings.dart";
 import 'package:flutter/material.dart';
 import "package:logging/logging.dart";
 import "package:photos/core/event_bus.dart";
+import "package:photos/events/files_updated_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
@@ -15,6 +16,7 @@ import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/face_thumbnail_squircle.dart";
 import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
+import "package:photos/ui/viewer/people/review_suggestion_changes.dart";
 import "package:photos/ui/viewer/people/review_thumbnail.dart";
 import "package:photos/ui/viewer/people/review_thumbnail_loader.dart";
 import "package:photos/ui/viewer/people/save_or_edit_person.dart";
@@ -25,10 +27,19 @@ final _logger = Logger("PersonGallerySuggestion");
 class PersonGallerySuggestion extends StatefulWidget {
   final PersonEntity? person;
   final VoidCallback? onClose;
+  @visibleForTesting
+  final Future<List<ClusterSuggestion>> Function()? loadSuggestions;
+  @visibleForTesting
+  final Future<void> Function(ClusterSuggestion, bool)? saveFeedback;
+  @visibleForTesting
+  final ReviewThumbnailLoader Function(int count)? createThumbnailLoader;
 
   const PersonGallerySuggestion({
     required this.person,
     this.onClose,
+    this.loadSuggestions,
+    this.saveFeedback,
+    this.createThumbnailLoader,
     super.key,
   });
 
@@ -50,6 +61,9 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   Object? _thumbnailError;
   late final StreamSubscription<PeopleChangedEvent> _peopleChangedEvent;
   int _suggestionLoadID = 0;
+  late final StreamSubscription<FilesUpdatedEvent> _filesUpdatedEvent;
+  bool _previewOpen = false;
+  bool _suggestionsInvalidated = false;
 
   PersonEntity? person;
   bool get personPage => widget.person != null;
@@ -64,17 +78,47 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   void initState() {
     super.initState();
     person = widget.person;
-    _thumbnailLoader = ReviewThumbnailLoader(personPage ? 4 : 3);
+    _thumbnailLoader = _createThumbnailLoader();
     _initializeAnimations();
     _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen((event) {
-      if (personPage &&
+      if (reviewSuggestionsAffectedBy(
+        event,
+        isProcessing
+            ? allSuggestions
+            : allSuggestions.skip(currentSuggestionIndex),
+        previewOpen: _previewOpen,
+      )) {
+        _invalidateSuggestions();
+      } else if (personPage &&
           event.type == PeopleEventType.reviewedSuggestion &&
           event.person?.remoteID == widget.person!.remoteID) {
-        unawaited(_reloadSuggestions());
+        _invalidateSuggestions();
+      }
+    });
+    _filesUpdatedEvent = Bus.instance.on<FilesUpdatedEvent>().listen((event) {
+      if (reviewSuggestionsAffectedBy(
+        event,
+        isProcessing
+            ? allSuggestions
+            : allSuggestions.skip(currentSuggestionIndex),
+        previewOpen: _previewOpen,
+      )) {
+        _invalidateSuggestions();
       }
     });
     _loadInitialSuggestion();
   }
+
+  void _invalidateSuggestions() {
+    _suggestionsInvalidated = true;
+    if (!_previewOpen && !isProcessing) {
+      unawaited(_reloadSuggestions());
+    }
+  }
+
+  ReviewThumbnailLoader _createThumbnailLoader() =>
+      widget.createThumbnailLoader?.call(personPage ? 4 : 3) ??
+      ReviewThumbnailLoader(personPage ? 4 : 3);
 
   void _initializeAnimations() {
     _slideController = AnimationController(
@@ -103,7 +147,9 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     final loadID = ++_suggestionLoadID;
     try {
       late final List<ClusterSuggestion> suggestions;
-      if (personPage) {
+      if (widget.loadSuggestions != null) {
+        suggestions = await widget.loadSuggestions!();
+      } else if (personPage) {
         suggestions = await ClusterFeedbackService.instance
             .getSuggestionForPerson(relevantPerson);
       } else {
@@ -161,8 +207,9 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   }
 
   Future<void> _reloadSuggestions() async {
+    _suggestionsInvalidated = false;
     _thumbnailLoader.dispose();
-    _thumbnailLoader = ReviewThumbnailLoader(personPage ? 4 : 3);
+    _thumbnailLoader = _createThumbnailLoader();
     _thumbnailError = null;
     _slideController?.reset();
     _fadeController?.reset();
@@ -213,7 +260,8 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   }
 
   Future<void> _navigateToCluster() async {
-    if (allSuggestions.isEmpty ||
+    if (isProcessing ||
+        allSuggestions.isEmpty ||
         currentSuggestionIndex >= allSuggestions.length) {
       return;
     }
@@ -223,6 +271,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       currentSuggestion.filesInCluster,
     );
     sortedFiles.sort((a, b) => b.creationTime!.compareTo(a.creationTime!));
+    _previewOpen = true;
     final result = await Navigator.of(context).push<ClusterPageResult>(
       MaterialPageRoute(
         builder: (context) => ClusterPage(
@@ -234,11 +283,13 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       ),
     );
 
-    if (!mounted || result != ClusterPageResult.ignoredPerson) {
-      return;
+    _previewOpen = false;
+    if (!mounted) return;
+    if (_suggestionsInvalidated) {
+      await _reloadSuggestions();
+    } else if (result == ClusterPageResult.ignoredPerson) {
+      await _consumeCurrentSuggestionAfterExternalAction();
     }
-
-    await _consumeCurrentSuggestionAfterExternalAction();
   }
 
   Future<void> _consumeCurrentSuggestionAfterExternalAction() async {
@@ -280,13 +331,16 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     }
 
     final loadID = _suggestionLoadID;
-    setState(() {
-      isProcessing = true;
-    });
+    final previousIndex = currentSuggestionIndex;
+    final previousCrops = faceCrops;
+    final previousPerson = person;
+    final currentSuggestion = allSuggestions[currentSuggestionIndex];
+    setState(() => isProcessing = true);
 
     try {
-      final currentSuggestion = allSuggestions[currentSuggestionIndex];
-      final feedbackFuture = accepted
+      final feedbackFuture = widget.saveFeedback != null
+          ? widget.saveFeedback!(currentSuggestion, accepted)
+          : accepted
           ? ClusterFeedbackService.instance.addClusterToExistingPerson(
               person: relevantPerson,
               clusterID: currentSuggestion.clusterIDToMerge,
@@ -294,25 +348,38 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
             )
           : _captureNotPersonFeedback(currentSuggestion);
 
+      // Show the next prepared group while the write finishes. Keep its actions
+      // disabled until success; a failed write must restore the reviewed group.
       await Future.wait([
-        _animateOut().then((_) {
-          if (mounted && loadID == _suggestionLoadID) {
-            setState(() => hasCurrentSuggestion = false);
-          }
-        }),
         feedbackFuture,
-      ]);
+        _animateOut().then((_) async {
+          if (!mounted || loadID != _suggestionLoadID) return;
+          setState(() => hasCurrentSuggestion = false);
+          await _prepareNextSuggestion(keepProcessing: true);
+        }),
+      ], eagerError: true);
       if (!mounted || loadID != _suggestionLoadID) return;
-      if (mounted) {
-        setState(() {
-          hasCurrentSuggestion = false;
-        });
+      if (_suggestionsInvalidated) {
+        await _reloadSuggestions();
+      } else {
+        setState(() => isProcessing = false);
       }
-      await _prepareNextSuggestion();
     } catch (e, s) {
       _logger.severe("Error handling user choice", e, s);
       if (mounted && loadID == _suggestionLoadID) {
+        // Invalidate a late thumbnail preparation before restoring the previous
+        // candidate. Saving and decoding complete independently.
+        _suggestionLoadID++;
+        if (_suggestionsInvalidated) {
+          await _reloadSuggestions();
+          if (mounted) await showGenericErrorDialog(context: context, error: e);
+          return;
+        }
         setState(() {
+          currentSuggestionIndex = previousIndex;
+          faceCrops = previousCrops;
+          person = previousPerson;
+          _thumbnailError = null;
           isProcessing = false;
           hasCurrentSuggestion = true;
         });
@@ -413,8 +480,15 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     }
   }
 
-  Future<void> _prepareNextSuggestion({bool advance = true}) async {
+  Future<void> _prepareNextSuggestion({
+    bool advance = true,
+    bool keepProcessing = false,
+  }) async {
     if (!mounted) return;
+    if (_suggestionsInvalidated && !keepProcessing) {
+      await _reloadSuggestions();
+      return;
+    }
 
     if (advance) currentSuggestionIndex++;
 
@@ -424,7 +498,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         if (!await _prepareSuggestionAt(currentSuggestionIndex, loadID)) return;
         if (mounted) {
           setState(() {
-            isProcessing = false;
+            isProcessing = keepProcessing;
             isPreparingNext = false;
             hasCurrentSuggestion = true;
           });
@@ -436,7 +510,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         _thumbnailError = e;
         if (mounted) {
           setState(() {
-            isProcessing = false;
+            isProcessing = keepProcessing;
             isPreparingNext = false;
             hasCurrentSuggestion = false;
           });
@@ -445,7 +519,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     } else {
       if (mounted) {
         setState(() {
-          isProcessing = false;
+          isProcessing = keepProcessing;
           isPreparingNext = false;
           hasCurrentSuggestion = false;
         });
@@ -478,6 +552,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     _suggestionLoadID++;
     _thumbnailLoader.dispose();
     _peopleChangedEvent.cancel();
+    _filesUpdatedEvent.cancel();
     _slideController?.dispose();
     _fadeController?.dispose();
     super.dispose();
