@@ -20,6 +20,7 @@ import "package:photos/module/download/thumbnail.dart";
 import "package:photos/service_locator.dart" show isLocalGalleryMode;
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_thumbnail_generator.dart";
+import "package:photos/utils/face/face_crop_request_queue.dart";
 
 final _logger = Logger("FaceCropUtils");
 
@@ -30,16 +31,8 @@ final _pendingBodyCrops = <String, Future<Map<String, Uint8List>?>>{};
 
 final LRUMap<String, String> _personOrClusterIdToCachedFaceID = LRUMap(2000);
 
-TaskQueue _queueFullFileFaceGenerations = TaskQueue<String>(
-  maxConcurrentTasks: 5,
-  taskTimeout: const Duration(minutes: 1),
-  maxQueueSize: 100,
-);
-TaskQueue _queueThumbnailFaceGenerations = TaskQueue<String>(
-  maxConcurrentTasks: 5,
-  taskTimeout: const Duration(minutes: 1),
-  maxQueueSize: 100,
-);
+final _queueFullFileFaceGenerations = FaceCropRequestQueue();
+final _queueThumbnailFaceGenerations = FaceCropRequestQueue();
 
 Uint8List? checkInMemoryCachedCropForPersonOrClusterID(
   String personOrClusterID,
@@ -389,9 +382,7 @@ Future<Map<String, Uint8List>?> _getFaceCropsUsingHeapPriorityQueue(
   bool useFullFile = true,
   String? taskSuffix,
 }) async {
-  final completer = Completer<Map<String, Uint8List>?>();
-
-  late final TaskQueue relevantTaskQueue;
+  late final FaceCropRequestQueue relevantTaskQueue;
   late String taskId;
   if (useFullFile) {
     relevantTaskQueue = _queueFullFileFaceGenerations;
@@ -403,16 +394,11 @@ Future<Map<String, Uint8List>?> _getFaceCropsUsingHeapPriorityQueue(
 
   // Body and face crops from the same file must not share a queue task ID.
   if (taskSuffix != null) taskId = "$taskId-$taskSuffix";
-  await relevantTaskQueue.addTask(taskId, () async {
-    final faceCrops = await _getFaceCrops(
-      file,
-      faceBoxeMap,
-      useFullFile: useFullFile,
-    );
-    completer.complete(faceCrops);
-  });
-
-  return completer.future;
+  return relevantTaskQueue.getCrops(
+    taskId,
+    faceBoxeMap,
+    (boxes) => _getFaceCrops(file, boxes, useFullFile: useFullFile),
+  );
 }
 
 Future<String> _faceCropTaskId(
