@@ -1,3 +1,4 @@
 - Prepare the next face or body review while feedback saves, retaining failed reviews for retry.
 - Refresh affected review suggestions after photo deletion, hiding, or mixed-grouping edits.
 - Share concurrent face crop results, including queued requests.
+- Save body review feedback locally first and synchronize it in the background, retaining unsent edits across restarts.

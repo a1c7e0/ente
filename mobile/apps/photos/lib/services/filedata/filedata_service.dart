@@ -18,6 +18,7 @@ import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/model/enc_file_data.dart";
 import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/filedata/model/response.dart";
+import "package:photos/services/machine_learning/body_feedback_service.dart";
 import "package:photos/services/machine_learning/ml_process_lock.dart";
 import "package:photos/services/machine_learning/ml_run_control.dart";
 import "package:photos/utils/file_key.dart";
@@ -52,12 +53,19 @@ class FileDataService {
     await _putFileData(file, data);
   }
 
-  Future<void> _putFileData(EnteFile file, FileDataEntity data) async {
+  Future<void> _putFileData(
+    EnteFile file,
+    FileDataEntity data, {
+    bool Function()? isCurrentSession,
+  }) async {
     final ChaChaEncryptionResult encryptionResult = await gzipAndEncryptJson(
       data.remoteRawData,
       getFileKey(file),
     );
 
+    if (isCurrentSession != null && !isCurrentSession()) {
+      throw StateError("Metadata write belongs to a stale account session");
+    }
     try {
       await _gateway.putFileData(
         fileID: file.uploadedFileID!,
@@ -81,6 +89,17 @@ class FileDataService {
     FileDataEntity? initialData,
   }) => _updateFileData(file, update, type: type, initialData: initialData);
 
+  Future<FileDataEntity> updateFileDataForSession(
+    EnteFile file,
+    FutureOr<bool> Function(FileDataEntity) update, {
+    required bool Function() isCurrentSession,
+  }) => _updateFileData(
+    file,
+    update,
+    type: DataType.mlData,
+    isCurrentSession: isCurrentSession,
+  );
+
   // Reset operations may write an empty ML map. Keep normal indexing writes
   // validated while allowing resets to preserve unknown or non-ML metadata.
   Future<FileDataEntity> updateFileDataAllowingPartialMetadata(
@@ -102,6 +121,7 @@ class FileDataService {
     required DataType type,
     bool allowPartialMetadata = false,
     FileDataEntity? initialData,
+    bool Function()? isCurrentSession,
   }) async {
     final fileID = file.uploadedFileID!;
     if (initialData != null &&
@@ -109,6 +129,9 @@ class FileDataService {
       throw ArgumentError("Metadata snapshot does not match the file and type");
     }
     for (int attempt = 0; attempt < 3; attempt++) {
+      if (isCurrentSession != null && !isCurrentSession()) {
+        throw StateError("Metadata write belongs to a stale account session");
+      }
       // A caller that already batch-fetched metadata can reuse that version on
       // the first attempt. Conflicts still fetch and merge the latest object.
       FileDataEntity? entity = attempt == 0 && initialData?.updatedAt != null
@@ -125,11 +148,8 @@ class FileDataService {
       }
       if (!await update(entity)) return entity;
       try {
-        if (allowPartialMetadata) {
-          await _putFileData(file, entity);
-        } else {
-          await putFileData(file, entity);
-        }
+        if (!allowPartialMetadata) entity.validate();
+        await _putFileData(file, entity, isCurrentSession: isCurrentSession);
         return entity;
       } on DioException catch (e) {
         if (e.response?.statusCode != 409 || attempt == 2) rethrow;
@@ -278,7 +298,10 @@ class FileDataService {
       MlProcessLock.instance.isBusy,
       "ML metadata hydration requires the ML process lock",
     );
-    return _syncMLData(initialCursor: initialCursor, control: control);
+    return _syncPendingAndMLData(
+      initialCursor: initialCursor,
+      control: control,
+    );
   }
 
   Future<bool> _syncMLDataWithLock({required int initialCursor}) async {
@@ -289,7 +312,7 @@ class FileDataService {
       () async {
         _metadataSyncControl = control;
         try {
-          changed = await _syncMLData(
+          changed = await _syncPendingAndMLData(
             initialCursor: initialCursor,
             control: control,
           );
@@ -313,6 +336,17 @@ class FileDataService {
 
   void stopMetadataSync(MlStopReason reason) {
     _metadataSyncControl?.requestStop(reason);
+  }
+
+  Future<bool> _syncPendingAndMLData({
+    required int initialCursor,
+    MlRunControl? control,
+  }) async {
+    if (control?.stopRequested ?? false) return false;
+    await BodyFeedbackService.instance.flushWhileLocked(
+      shouldStop: () => control?.stopRequested ?? false,
+    );
+    return _syncMLData(initialCursor: initialCursor, control: control);
   }
 
   Future<bool> _syncMLData({

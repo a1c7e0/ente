@@ -8,11 +8,12 @@ import "package:photos/db/ml/db.dart";
 import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
+import "package:photos/models/ml/body_feedback.dart";
 import "package:photos/models/ml/face/box.dart";
 import "package:photos/models/ml/face/face.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
-import "package:photos/services/filedata/model/file_data.dart";
+import "package:photos/services/machine_learning/body_feedback_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
 import "package:photos/services/search_service.dart";
@@ -115,6 +116,7 @@ class BodyRecognitionService {
       },
     );
 
+    await BodyFeedbackService.instance.discardFiles([fileID]);
     final remoteBody = updated.remoteRawData["body"];
     Map<String, dynamic>? body;
     if (remoteBody is Map) {
@@ -154,6 +156,7 @@ class BodyRecognitionService {
       remoteChanged = latest.remoteRawData.remove("body") != null;
       return remoteChanged;
     });
+    await BodyFeedbackService.instance.discardFiles([fileID]);
     await MLDataDB.instance.deleteBodyIndexes([fileID]);
     invalidateCaches();
     return remoteChanged || localBodyJson != null;
@@ -179,7 +182,9 @@ class BodyRecognitionService {
   }
 
   Future<Map<int, BodyIndex>> indexes() async {
-    final data = await MLDataDB.instance.bodyIndexes();
+    final data = await BodyFeedbackService.instance.overlay(
+      await MLDataDB.instance.bodyIndexes(),
+    );
     if (identical(data, _rawIndexes)) return _parsedIndexes;
     if (data.length == _rawIndexes.length &&
         data.entries.every((e) => _rawIndexes[e.key] == e.value)) {
@@ -369,14 +374,18 @@ class BodyRecognitionService {
     String bodyID,
     void Function(BodyDetection) update,
   ) async {
-    final entity = await fileDataService.updateFileData(file, (latest) {
-      final index = latest.bodyIndex;
-      if (index == null) throw StateError("Body index is unavailable");
-      update(index.detections.firstWhere((d) => d.bodyID == bodyID));
-      latest.putBody(index);
-      return true;
+    final indexes = await this.indexes();
+    final original = indexes[file.uploadedFileID];
+    if (original == null) throw StateError("Body index is unavailable");
+    final updated = BodyIndex.tryParse(
+      jsonDecode(jsonEncode(original.toJson())),
+    )!;
+    update(updated.detections.firstWhere((d) => d.bodyID == bodyID));
+    await BodyFeedbackService.instance.enqueue({
+      file.uploadedFileID!: BodyFeedbackPatch.between(original, updated),
     });
-    await store(MLDataDB.instance, file.uploadedFileID!, entity.bodyIndex!);
+    invalidateCaches();
+    BodyFeedbackService.instance.scheduleSync();
   }
 
   Future<void> acceptGroup(
@@ -393,43 +402,34 @@ class BodyRecognitionService {
     final files = await FilesDB.instance.getFileIDToFileFromIDs(
       members.map((m) => m.$1).toList(),
     );
-    // Check all current partitions before introducing any manual photo tags.
-    final ids = files.keys.toList();
-    final checkedMetadata = <int, FileDataEntity>{};
-    for (int start = 0; start < ids.length; start += 200) {
-      final end = start + 200 < ids.length ? start + 200 : ids.length;
-      final batch = ids.sublist(start, end).toSet();
-      final response = await fileDataService.getFilesData(batch);
-      if (response.fetchErrorFileIDs.isNotEmpty) {
-        throw StateError("Metadata fetch failed");
-      }
-      // Retain at most one batch of snapshots for reuse during the write phase.
-      for (final entry in response.data.entries) {
-        if (checkedMetadata.length >= 200) break;
-        checkedMetadata[entry.key] = entry.value;
-      }
-      for (final member in members.where((m) => batch.contains(m.$1))) {
-        final index = response.data[member.$1]?.bodyIndex;
-        if (index == null) throw StateError("Body index is unavailable");
-        index.detections
-            .firstWhere((d) => d.bodyID == member.$2.bodyID)
-            .bindReviewGroup(reference);
-      }
-    }
-    final assigned = await PersonService.instance.addManualFileAssignments(
-      personID: person.remoteID,
-      fileIDs: files.keys.toSet(),
+    final current = await PersonService.instance.getPerson(person.remoteID);
+    if (current == null) throw StateError("Person is unavailable");
+    final existing = current.data.manuallyAssigned.toSet();
+    existing.addAll(
+      (await MLDataDB.instance.getFileIdToClusterIDSet(person.remoteID)).keys,
     );
+    final currentIndexes = await indexes();
+    final bodyAddedManual = {
+      for (final entry in currentIndexes.entries)
+        if (entry.value.detections.any((body) {
+          final decision = body.decisions[person.remoteID];
+          return decision is Map &&
+              decision["status"] == "accepted" &&
+              decision["addedManual"] == true;
+        }))
+          entry.key,
+    };
     await _updateGroup(files, members, (fileID, body) {
       body.bindReviewGroup(reference);
       final previous = body.decisions[person.remoteID];
       body.decisions[person.remoteID] = {
         "status": "accepted",
         "addedManual":
-            assigned.addedFileIds.contains(fileID) ||
+            !existing.contains(fileID) ||
+            bodyAddedManual.contains(fileID) ||
             (previous is Map && previous["addedManual"] == true),
       };
-    }, initialMetadata: checkedMetadata);
+    });
   }
 
   Future<void> rejectGroup(
@@ -455,89 +455,41 @@ class BodyRecognitionService {
   Future<void> _updateGroup(
     Map<int, EnteFile> files,
     List<(int, BodyDetection)> members,
-    void Function(int, BodyDetection) update, {
-    Map<int, FileDataEntity>? initialMetadata,
-  }) async {
-    final bodiesByFile = <int, Set<String>>{};
-    for (final member in members) {
-      if (files.containsKey(member.$1)) {
-        bodiesByFile.putIfAbsent(member.$1, () => {}).add(member.$2.bodyID);
-      }
-    }
-    final fileIDs = bodiesByFile.keys.toList();
-    // Different files are independent. Keep each file's changes in a single
-    // conflict-checked update so two bodies never race over the same mldata.
-    const batchSize = 4;
-    for (var start = 0; start < fileIDs.length; start += batchSize) {
-      final end = start + batchSize < fileIDs.length
-          ? start + batchSize
-          : fileIDs.length;
-      final batch = fileIDs.sublist(start, end);
-      final metadata = <int, FileDataEntity>{
-        for (final id in batch)
-          if (initialMetadata?[id] != null) id: initialMetadata![id]!,
-      };
-      final missing = batch.where((id) => !metadata.containsKey(id)).toSet();
-      if (missing.isNotEmpty) {
-        final response = await fileDataService.getFilesData(missing);
-        if (response.fetchErrorFileIDs.isNotEmpty) {
-          throw StateError("Metadata fetch failed");
-        }
-        metadata.addAll(response.data);
-      }
-      await Future.wait(
-        batch.map((fileID) async {
-          final entity = await fileDataService.updateFileData(files[fileID]!, (
-            latest,
-          ) {
-            final index = latest.bodyIndex;
-            if (index == null) throw StateError("Body index is unavailable");
-            for (final bodyID in bodiesByFile[fileID]!) {
-              update(
-                fileID,
-                index.detections.firstWhere((b) => b.bodyID == bodyID),
-              );
-            }
-            latest.putBody(index);
-            return true;
-          }, initialData: metadata[fileID]);
-          await store(MLDataDB.instance, fileID, entity.bodyIndex!);
-        }),
+    void Function(int, BodyDetection) update,
+  ) async {
+    final indexes = await this.indexes();
+    final changed = <int, BodyIndex>{};
+    for (final (id, detection) in members) {
+      if (!files.containsKey(id)) continue;
+      final original = indexes[id];
+      if (original == null) throw StateError("Body index is unavailable");
+      final next = changed.putIfAbsent(
+        id,
+        () => BodyIndex.tryParse(jsonDecode(jsonEncode(original.toJson())))!,
+      );
+      update(
+        id,
+        next.detections.firstWhere((d) => d.bodyID == detection.bodyID),
       );
     }
+    await BodyFeedbackService.instance.enqueue({
+      for (final entry in changed.entries)
+        entry.key: BodyFeedbackPatch.between(indexes[entry.key]!, entry.value),
+    });
+    invalidateCaches();
+    BodyFeedbackService.instance.scheduleSync();
   }
 
   Future<void> undoGroup(PersonEntity person, String reference) async {
     final members = await groupMembers(reference);
-    final introduced = <int>{};
-    for (final member in members) {
-      final decision = member.$2.decisions[person.remoteID];
-      if (decision is Map && decision["addedManual"] == true) {
-        introduced.add(member.$1);
-      }
-    }
-    final current = await PersonService.instance.getPerson(person.remoteID);
-    if (current != null && introduced.isNotEmpty) {
-      await PersonService.instance.updatePerson(
-        current.copyWith(
-          data: current.data.copyWith(
-            manuallyAssigned: current.data.manuallyAssigned
-                .where((id) => !introduced.contains(id))
-                .toList(),
-          ),
-        ),
-      );
-    }
-    for (final member in members) {
-      final file = await FilesDB.instance.getAnyUploadedFile(member.$1);
-      if (file != null) {
-        await _updateBody(
-          file,
-          member.$2.bodyID,
-          (body) => body.decisions.remove(person.remoteID),
-        );
-      }
-    }
+    final files = await FilesDB.instance.getFileIDToFileFromIDs(
+      members.map((member) => member.$1).toList(),
+    );
+    await _updateGroup(
+      files,
+      members,
+      (_, body) => body.decisions.remove(person.remoteID),
+    );
   }
 
   Future<Map<String, List<EnteFile>>> splitGroup(
@@ -551,30 +503,6 @@ class BodyRecognitionService {
     String? suggestedPerson;
     for (final group in candidates) {
       if (group.id == reference) suggestedPerson = group.personID;
-    }
-    final introduced = <String, Set<int>>{};
-    for (final member in members.where((m) => selected.contains(m.$1))) {
-      for (final decision in member.$2.decisions.entries) {
-        if (decision.value is Map &&
-            decision.value["status"] == "accepted" &&
-            decision.value["addedManual"] == true) {
-          introduced.putIfAbsent(decision.key, () => {}).add(member.$1);
-        }
-      }
-    }
-    for (final entry in introduced.entries) {
-      final person = await PersonService.instance.getPerson(entry.key);
-      if (person != null) {
-        await PersonService.instance.updatePerson(
-          person.copyWith(
-            data: person.data.copyWith(
-              manuallyAssigned: person.data.manuallyAssigned
-                  .where((id) => !entry.value.contains(id))
-                  .toList(),
-            ),
-          ),
-        );
-      }
     }
     final selectedID = "body-group:${newClusterID()}";
     final result = <String, List<EnteFile>>{};
@@ -644,54 +572,33 @@ class BodyRecognitionService {
     String personID,
     Map<String, dynamic>? decision,
   ) async {
-    final entity = await fileDataService.updateFileData(file, (latest) {
-      final index = latest.bodyIndex;
-      if (index == null) throw StateError("Body index is unavailable");
-      final body = index.detections.firstWhere((d) => d.bodyID == bodyID);
+    await _updateBody(file, bodyID, (body) {
       if (decision == null) {
         body.decisions.remove(personID);
       } else {
         body.decisions[personID] = decision;
       }
-      latest.putBody(index);
-      return true;
     });
-    await store(MLDataDB.instance, file.uploadedFileID!, entity.bodyIndex!);
   }
 
   Future<void> accept(PersonEntity person, EnteFile file, String bodyID) async {
-    final result = await PersonService.instance.addManualFileAssignments(
-      personID: person.remoteID,
-      fileIDs: {file.uploadedFileID!},
+    final index = (await indexes())[file.uploadedFileID];
+    if (index == null) throw StateError("Body index is unavailable");
+    await acceptGroup(
+      person,
+      bodyID,
+      suggestionSnapshot: {
+        file.uploadedFileID!: index.detections.firstWhere(
+          (d) => d.bodyID == bodyID,
+        ),
+      },
     );
-    await updateDecision(file, bodyID, person.remoteID, {
-      "status": "accepted",
-      "addedManual": result.addedFileIds.isNotEmpty,
-    });
   }
 
   Future<void> reject(String personID, EnteFile file, String bodyID) =>
       updateDecision(file, bodyID, personID, {"status": "rejected"});
 
   Future<void> undo(PersonEntity person, EnteFile file, String bodyID) async {
-    final index = (await indexes())[file.uploadedFileID];
-    final decision = index?.detections
-        .firstWhere((d) => d.bodyID == bodyID)
-        .decisions[person.remoteID];
-    if (decision is Map && decision["addedManual"] == true) {
-      final current = await PersonService.instance.getPerson(person.remoteID);
-      if (current != null) {
-        await PersonService.instance.updatePerson(
-          current.copyWith(
-            data: current.data.copyWith(
-              manuallyAssigned: current.data.manuallyAssigned
-                  .where((id) => id != file.uploadedFileID)
-                  .toList(),
-            ),
-          ),
-        );
-      }
-    }
     await updateDecision(file, bodyID, person.remoteID, null);
   }
 

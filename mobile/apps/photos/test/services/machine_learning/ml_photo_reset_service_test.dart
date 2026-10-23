@@ -10,6 +10,7 @@ import "package:photos/models/ml/face/person.dart";
 import "package:photos/services/filedata/filedata_service.dart";
 import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/filedata/model/response.dart";
+import "package:photos/services/machine_learning/body_feedback_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_photo_reset_service.dart";
 import "package:photos/utils/face/face_thumbnail_cache.dart"
@@ -17,6 +18,40 @@ import "package:photos/utils/face/face_thumbnail_cache.dart"
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final fullReset in [false, true]) {
+    test(
+      "${fullReset ? 'full' : 'binding'} reset retires only successfully reset pending feedback",
+      () async {
+        final db = _MemoryMLDB()
+          ..body.addAll({
+            10: jsonEncode(_bodyIndex()),
+            11: jsonEncode(_bodyIndex()),
+          });
+        final persons = _MemoryPersons([_person("pending-body-only")]);
+        final metadata = _MemoryMetadata({
+          10: {"body": _bodyIndex()},
+          11: {"body": _bodyIndex()},
+        })..fetchErrors = {11};
+        final feedback = _PendingFeedback({
+          10: jsonEncode(_bodyIndex(acceptedPerson: "pending-body-only")),
+          11: jsonEncode(_bodyIndex(acceptedPerson: "pending-body-only")),
+        });
+        final service = _service(db, persons, metadata, feedback: feedback);
+        final result = fullReset
+            ? await service.reset([_file(10), _file(11)])
+            : await service.resetPersonBindings([_file(10), _file(11)]);
+        expect(result.failedFileIDs, [11]);
+        expect(feedback.discarded, {10});
+        expect(feedback.pending.keys, [11]);
+        expect(
+          persons.deleted,
+          isEmpty,
+          reason: "another photo still has pending feedback",
+        );
+      },
+    );
+  }
 
   test(
     "full reset deletes emptied persons and preserves remaining links",
@@ -456,11 +491,14 @@ void main() {
 MLPhotoResetService _service(
   _MemoryMLDB db,
   _MemoryPersons persons,
-  _MemoryMetadata metadata,
-) => MLPhotoResetService(
+  _MemoryMetadata metadata, {
+  BodyFeedbackService? feedback,
+}) => MLPhotoResetService(
   db: db,
   persons: persons,
   metadata: metadata,
+  feedback:
+      feedback ?? BodyFeedbackService(ownerID: () => null, token: () => null),
   invalidateBodyCaches: () {},
 );
 
@@ -700,4 +738,23 @@ class _MemoryMetadata implements FileDataService {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _PendingFeedback extends BodyFeedbackService {
+  _PendingFeedback(this.pending)
+    : super(ownerID: () => null, token: () => null);
+  final Map<int, String> pending;
+  final Set<int> discarded = {};
+  @override
+  Future<Map<int, String>> overlay(Map<int, String> raw) async => {
+    ...raw,
+    ...pending,
+  };
+  @override
+  Future<void> discardFiles(Iterable<int> ids) async {
+    discarded.addAll(ids);
+    for (final id in ids) {
+      pending.remove(id);
+    }
+  }
 }

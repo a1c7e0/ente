@@ -1,6 +1,7 @@
 import "dart:convert";
 
 import "package:computer/computer.dart";
+import "package:dio/dio.dart";
 import "package:flutter_test/flutter_test.dart";
 import "package:photos/core/event_bus.dart";
 import "package:photos/db/ml/base.dart";
@@ -98,11 +99,58 @@ void main() {
       expect(db.removedPersons, isEmpty);
     },
   );
+  test(
+    "queued manual assignment retries against the updated person version",
+    () async {
+      entities.seed(PersonData(name: "Alex", manuallyAssigned: [1]));
+      entities.conflictUpdate = PersonData(
+        name: "Updated elsewhere",
+        manuallyAssigned: [1, 9],
+      );
+      await service.setManualFileAssignmentForSession(
+        "person",
+        7,
+        true,
+        () => true,
+      );
+      final person = await service.getPerson("person");
+      expect(person!.data.name, "Updated elsewhere");
+      expect(person.data.manuallyAssigned.toSet(), {1, 7, 9});
+      expect(entities.expectedVersions, [1, 2]);
+    },
+  );
+
+  test(
+    "queued manual removal preserves other tags and rejects a stale session",
+    () async {
+      entities.seed(PersonData(name: "Alex", manuallyAssigned: [7, 9]));
+      await service.setManualFileAssignmentForSession(
+        "person",
+        7,
+        false,
+        () => true,
+      );
+      expect((await service.getPerson("person"))!.data.manuallyAssigned, [9]);
+      await expectLater(
+        service.setManualFileAssignmentForSession(
+          "person",
+          8,
+          true,
+          () => false,
+        ),
+        throwsStateError,
+      );
+      expect((await service.getPerson("person"))!.data.manuallyAssigned, [9]);
+    },
+  );
 }
 
 class _EntityService implements EntityService {
   LocalEntityData? entity;
   bool failDelete = false;
+  PersonData? conflictUpdate;
+  bool conflictRaised = false;
+  final expectedVersions = <int?>[];
 
   void seed(PersonData data) {
     entity = LocalEntityData(
@@ -140,6 +188,42 @@ class _EntityService implements EntityService {
   }) async {
     seed(PersonData.fromJson(jsonMap));
     return entity!;
+  }
+
+  @override
+  Future<LocalEntityData> addOrUpdateForSession(
+    EntityType type,
+    Map<String, dynamic> data, {
+    required String id,
+    required bool Function() isCurrentSession,
+    int? expectedUpdatedAt,
+  }) async {
+    if (!isCurrentSession()) throw StateError("stale session");
+    expectedVersions.add(expectedUpdatedAt);
+    if (conflictUpdate != null && !conflictRaised) {
+      conflictRaised = true;
+      final options = RequestOptions(path: "/user-entities");
+      throw DioException(
+        requestOptions: options,
+        response: Response(requestOptions: options, statusCode: 409),
+      );
+    }
+    seed(PersonData.fromJson(data));
+    return entity!;
+  }
+
+  @override
+  Future<int> syncEntity(EntityType type) async {
+    if (conflictUpdate == null) return 0;
+    seed(conflictUpdate!);
+    entity = LocalEntityData(
+      id: entity!.id,
+      type: entity!.type,
+      data: entity!.data,
+      ownerID: entity!.ownerID,
+      updatedAt: 2,
+    );
+    return 1;
   }
 
   @override

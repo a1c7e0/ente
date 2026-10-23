@@ -12,6 +12,7 @@ import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/filedata_service.dart";
 import "package:photos/services/filedata/model/file_data.dart";
+import "package:photos/services/machine_learning/body_feedback_service.dart";
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/person/person_service.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
@@ -34,10 +35,12 @@ class MLPhotoResetService {
     IMLDataDB<int>? db,
     PersonService? persons,
     FileDataService? metadata,
+    BodyFeedbackService? feedback,
     void Function()? invalidateBodyCaches,
   }) : _db = db,
        _persons = persons,
        _metadata = metadata,
+       _feedback = feedback ?? BodyFeedbackService.instance,
        _invalidateBodyCaches =
            invalidateBodyCaches ??
            (() => BodyRecognitionService.instance.invalidateCaches());
@@ -46,6 +49,7 @@ class MLPhotoResetService {
   final IMLDataDB<int>? _db;
   final PersonService? _persons;
   final FileDataService? _metadata;
+  final BodyFeedbackService _feedback;
   final void Function() _invalidateBodyCaches;
   IMLDataDB<int> get _dataDB => _db ?? MLDataDB.instance;
   PersonService get _personService => _persons ?? PersonService.instance;
@@ -149,7 +153,9 @@ class MLPhotoResetService {
     final bodyPersonIDs = <String>{};
     final bodyIndexes = ids.isEmpty
         ? <int, String>{}
-        : Map<int, String>.of(await _dataDB.bodyIndexes());
+        : Map<int, String>.of(
+            await _feedback.overlay(await _dataDB.bodyIndexes()),
+          );
     const readBatchSize = 200;
     const writeBatchSize = 4;
     for (var start = 0; start < ids.length; start += readBatchSize) {
@@ -229,6 +235,7 @@ class MLPhotoResetService {
                           (FileDataEntity.empty(id, DataType.mlData)
                             ..updatedAt = 0),
                     );
+                await _feedback.discardFiles([id]);
                 if (!fullReset) {
                   final body = updated.bodyIndex;
                   if (body == null) {

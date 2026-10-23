@@ -28,6 +28,7 @@ import 'package:photos/db/files_db.dart';
 import "package:photos/db/gallery_downloads_db.dart";
 import "package:photos/db/memories_db.dart";
 import "package:photos/db/memory_shares_db.dart";
+import "package:photos/db/ml/body_feedback_db.dart";
 import "package:photos/db/ml/db.dart";
 import "package:photos/db/social_db.dart";
 import 'package:photos/db/trash_db.dart';
@@ -231,6 +232,7 @@ class Configuration implements LockScreenHost, AccountDeletionHost {
     await CollectionsDB.instance.clearTable();
     await MemoriesDB.instance.clearTable();
     await MemorySharesDB.instance.clearTable();
+    await BodyFeedbackDB.instance.clear();
     await MLDataDB.instance.clearTable();
     await UploadLocksDB.instance.clearTable();
     await TrashDB.instance.clearTable();
