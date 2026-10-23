@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
     build:
-        if: github.repository == 'a1c7e0/ente' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab' || github.ref == 'refs/heads/feat/face-profile-review' || github.ref == 'refs/heads/feat/integration-test')
+        if: github.repository == 'a1c7e0/ente' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab' || github.ref == 'refs/heads/feat/face-profile-review' || github.ref == 'refs/heads/feat/integration-test' || github.ref == 'refs/heads/fix/review-feedback-refresh')
         name: Build ${{ matrix.app }} arm64 APK
         strategy:
             fail-fast: false
@@ -22,7 +22,7 @@ jobs:
         timeout-minutes: 90
         env:
             APP: ${{ matrix.app }}
-            APK_CHANNEL: ${{ github.ref == 'refs/heads/feat/integration-test' && 'integration' || github.ref == 'refs/heads/feat/ml-lab' && 'ml-lab' || github.ref == 'refs/heads/feat/face-profile-review' && 'face-profile-review' || 'main' }}
+            APK_CHANNEL: ${{ github.ref == 'refs/heads/fix/review-feedback-refresh' && 'review-feedback' || github.ref == 'refs/heads/feat/integration-test' && 'integration' || github.ref == 'refs/heads/feat/ml-lab' && 'ml-lab' || github.ref == 'refs/heads/feat/face-profile-review' && 'face-profile-review' || 'main' }}
             ML_DIAGNOSTICS: ${{ github.ref == 'refs/heads/feat/ml-lab' || github.ref == 'refs/heads/feat/integration-test' }}
             CARGO_BUILD_JOBS: 2
             CARGO_INCREMENTAL: 0
