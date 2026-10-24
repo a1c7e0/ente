@@ -62,6 +62,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   late ReviewThumbnailLoader _thumbnailLoader;
   ReviewThumbnails _currentThumbnails = {};
   int _suggestionLoadID = 0;
+  PeopleChangedEvent? _lastReviewedEvent;
   bool _restoringSuggestion = false;
   List<SuggestionUserFeedback> pastUserFeedback = [];
   List<ClusterSuggestion> allSuggestions = [];
@@ -326,7 +327,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
               bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
             );
       await Future.wait([
-        feedback,
+        feedback.then((_) => _notifySuggestionReviewed()),
         () async {
           if (previousIndex + 1 >= allSuggestions.length) return;
           try {
@@ -348,7 +349,6 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
       if (!mounted || loadID != _suggestionLoadID) return;
       _savingFeedback = false;
       pastUserFeedback.add(SuggestionUserFeedback(yesOrNo, suggestion));
-      _notifySuggestionReviewed();
       if (_suggestionsInvalidated ||
           !yesOrNo ||
           previousIndex + 1 >= numberOfSuggestions) {
@@ -380,13 +380,13 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   }
 
   void _notifySuggestionReviewed() {
-    Bus.instance.fire(
-      PeopleChangedEvent(
-        person: widget.person,
-        type: PeopleEventType.reviewedSuggestion,
-        source: runtimeType.toString(),
-      ),
+    final event = PeopleChangedEvent(
+      person: widget.person,
+      type: PeopleEventType.reviewedSuggestion,
+      source: runtimeType.toString(),
     );
+    _lastReviewedEvent = event;
+    Bus.instance.fire(event);
   }
 
   Future<void> _saveAsAnotherPerson() async {
@@ -451,6 +451,14 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   }
 
   void _onSuggestionChanged(Event event) {
+    if (identical(event, _lastReviewedEvent)) return;
+    if (event is PeopleChangedEvent &&
+        event.type == PeopleEventType.reviewedSuggestion &&
+        event.person?.remoteID == widget.person.remoteID) {
+      _suggestionsInvalidated = true;
+      if (!_previewOpen && !_savingFeedback) _reloadSuggestions();
+      return;
+    }
     if (!reviewSuggestionsAffectedBy(
       event,
       _savingFeedback
@@ -661,9 +669,9 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
           lastFeedback.suggestion.clusterIDToMerge,
         );
       }
+      _notifySuggestionReviewed();
       if (!mounted) return;
       pastUserFeedback.removeLast();
-      _notifySuggestionReviewed();
       final loadID = ++_suggestionLoadID;
       final remaining = allSuggestions.sublist(currentSuggestionIndex)
         ..insert(0, lastFeedback.suggestion);

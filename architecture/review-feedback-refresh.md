@@ -1,6 +1,8 @@
 # Review feedback and preview refresh
 
-Changes live on `fix/review-feedback-refresh`, based on the existing client cache fixes.
+Review and cache changes live on `fix/review-feedback-refresh`. Body feedback
+persistence has also been promoted separately to `main`; see
+[body feedback synchronization](body-feedback-sync.md).
 
 ## Saving feedback
 
@@ -51,6 +53,19 @@ Changes while the cluster preview is open are coalesced until return; changes
 during feedback saving are handled after completion. Upload IDs match deleted
 photos across different local album rows. Moving out of an album is not treated
 as deleting the photo from the library.
+
+## Reviews completed on another page
+
+Both review surfaces publish the existing `reviewedSuggestion` event after a
+successful feedback write. The all-people card reloads for any reviewed person;
+person-specific cards and review pages reload only for their own person. The
+sender ignores its own event so its prepared next candidate remains usable.
+The notification follows the write even if the user has already navigated back.
+Generation checks keep older queries from restoring a completed suggestion.
+
+Widget regressions navigate from the all-people card to either review surface,
+accept or reject the last suggestion, and return before or after saving completes.
+They also exercise an obsolete query completing after a more recent refresh.
 
 ## Crop queue provenance
 

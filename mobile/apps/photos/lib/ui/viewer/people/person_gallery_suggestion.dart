@@ -61,6 +61,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
   Object? _thumbnailError;
   late final StreamSubscription<PeopleChangedEvent> _peopleChangedEvent;
   int _suggestionLoadID = 0;
+  PeopleChangedEvent? _lastReviewedEvent;
   late final StreamSubscription<FilesUpdatedEvent> _filesUpdatedEvent;
   bool _previewOpen = false;
   bool _suggestionsInvalidated = false;
@@ -81,6 +82,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     _thumbnailLoader = _createThumbnailLoader();
     _initializeAnimations();
     _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen((event) {
+      if (identical(event, _lastReviewedEvent)) return;
       if (reviewSuggestionsAffectedBy(
         event,
         isProcessing
@@ -89,9 +91,8 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         previewOpen: _previewOpen,
       )) {
         _invalidateSuggestions();
-      } else if (personPage &&
-          event.type == PeopleEventType.reviewedSuggestion &&
-          event.person?.remoteID == widget.person!.remoteID) {
+      } else if (event.type == PeopleEventType.reviewedSuggestion &&
+          (!personPage || event.person?.remoteID == widget.person!.remoteID)) {
         _invalidateSuggestions();
       }
     });
@@ -351,7 +352,9 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       // Show the next prepared group while the write finishes. Keep its actions
       // disabled until success; a failed write must restore the reviewed group.
       await Future.wait([
-        feedbackFuture,
+        feedbackFuture.then(
+          (_) => _notifySuggestionReviewed(currentSuggestion.person),
+        ),
         _animateOut().then((_) async {
           if (!mounted || loadID != _suggestionLoadID) return;
           setState(() => hasCurrentSuggestion = false);
@@ -395,12 +398,17 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       clusterID: suggestion.clusterIDToMerge,
       bodyDetectionsByFile: suggestion.bodyDetectionsByFile,
     );
-    Bus.instance.fire(
-      PeopleChangedEvent(
-        person: suggestion.person,
-        source: suggestion.clusterIDToMerge,
-      ),
+  }
+
+  void _notifySuggestionReviewed(PersonEntity reviewedPerson) {
+    final event = PeopleChangedEvent(
+      person: reviewedPerson,
+      type: PeopleEventType.reviewedSuggestion,
+      source: runtimeType.toString(),
     );
+    // Other mounted review surfaces must reload; this one already advanced.
+    _lastReviewedEvent = event;
+    Bus.instance.fire(event);
   }
 
   Future<void> _saveAsAnotherPerson() async {
@@ -447,6 +455,9 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
           clusterID: clusterID,
           bodyDetectionsByFile: currentSuggestion.bodyDetectionsByFile,
         );
+      }
+      if (result != null && result != false) {
+        _notifySuggestionReviewed(currentSuggestion.person);
       }
       if (!mounted || loadID != _suggestionLoadID) return;
       if (result == null || result == false) {
