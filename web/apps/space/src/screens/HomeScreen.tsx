@@ -15,6 +15,7 @@ import {
     focusFeedPost,
     registerFeedPost,
 } from "components/feed-video-playback";
+import { feedVideoPreloadIndices } from "components/feed-video-preloading";
 import {
     SpaceFileViewer,
     type SpaceFileViewerController,
@@ -671,6 +672,7 @@ const FeedPhoto: React.FC<{
     onLoadVideo?: SpacePostAssetURLLoader;
     onOpenPhoto?: () => void;
     shouldLoad: boolean;
+    shouldMountVideo: boolean;
     shouldPreloadVideo: boolean;
     thumbHash?: string;
     viewerOrigin?: string;
@@ -684,6 +686,7 @@ const FeedPhoto: React.FC<{
     onLoadVideo,
     onOpenPhoto,
     shouldLoad,
+    shouldMountVideo,
     shouldPreloadVideo,
     thumbHash,
     video,
@@ -820,11 +823,12 @@ const FeedPhoto: React.FC<{
                     }}
                 />
             )}
-            {!isPostUnavailable && video && shouldPreloadVideo && (
+            {!isPostUnavailable && video && shouldMountVideo && (
                 <SpaceInlinePostVideo
                     imageUrl={displayImageUrl}
                     video={video}
                     isActive={isActive}
+                    shouldPreload={shouldPreloadVideo}
                     muted={muted}
                     onLoadVideo={onLoadVideo}
                 />
@@ -902,6 +906,7 @@ const FeedItem: React.FC<FeedItemProps> = ({
     const feedPhotos = photos ?? [{ imageUrl, thumbHash }];
     const hasVideo = feedPhotos.some((photo) => Boolean(photo.video));
     const activePhoto = feedPhotos[photoIndex]!;
+    const videoPreloadIndices = feedVideoPreloadIndices(feedPhotos, photoIndex);
     const carouselRef = React.useRef<HTMLDivElement | null>(null);
     React.useEffect(() => registerFeedPost(carouselRef.current!), []);
     const photoAnimationRef = React.useRef<number | null>(null);
@@ -914,6 +919,8 @@ const FeedItem: React.FC<FeedItemProps> = ({
         dragging: boolean;
     } | null>(null);
     const suppressPhotoClickRef = React.useRef(false);
+    const photoClickTimeoutRef =
+        React.useRef<ReturnType<typeof setTimeout>>(undefined);
     const scrollToPhoto = React.useCallback(
         (index: number) => {
             const carousel = carouselRef.current;
@@ -970,6 +977,7 @@ const FeedItem: React.FC<FeedItemProps> = ({
         () => () => {
             if (photoAnimationRef.current != null)
                 cancelAnimationFrame(photoAnimationRef.current);
+            clearTimeout(photoClickTimeoutRef.current);
         },
         [],
     );
@@ -1374,6 +1382,8 @@ const FeedItem: React.FC<FeedItemProps> = ({
                         if (!swipe.dragging) {
                             if (Math.max(Math.abs(dx), Math.abs(dy)) < 8)
                                 return;
+                            clearTimeout(photoClickTimeoutRef.current);
+                            photoClickTimeoutRef.current = undefined;
                             if (Math.abs(dy) >= Math.abs(dx)) {
                                 swipeRef.current = null;
                                 scrollToPhoto(swipe.index);
@@ -1397,15 +1407,39 @@ const FeedItem: React.FC<FeedItemProps> = ({
                         );
                     }}
                     onPointerUp={finishPhotoSwipe}
-                    onPointerCancel={finishPhotoSwipe}
+                    onPointerCancel={(event) => {
+                        clearTimeout(photoClickTimeoutRef.current);
+                        photoClickTimeoutRef.current = undefined;
+                        finishPhotoSwipe(event);
+                    }}
                     onClickCapture={(event) => {
-                        if (!suppressPhotoClickRef.current || event.detail == 0)
+                        if (event.detail == 0) return;
+                        if (suppressPhotoClickRef.current) {
+                            suppressPhotoClickRef.current = false;
+                            event.preventDefault();
+                            event.stopPropagation();
                             return;
-                        suppressPhotoClickRef.current = false;
+                        }
+                        if (isOwnPost || !showFooter) return;
                         event.preventDefault();
                         event.stopPropagation();
+                        if (photoClickTimeoutRef.current != undefined) {
+                            clearTimeout(photoClickTimeoutRef.current);
+                            photoClickTimeoutRef.current = undefined;
+                            if (!isLiked) handleLikeClick();
+                            return;
+                        }
+                        const target = (event.target as Element).closest<
+                            HTMLButtonElement | HTMLVideoElement
+                        >("button, video");
+                        photoClickTimeoutRef.current = setTimeout(() => {
+                            photoClickTimeoutRef.current = undefined;
+                            target?.click();
+                        }, 180);
                     }}
                     onScroll={(event) => {
+                        clearTimeout(photoClickTimeoutRef.current);
+                        photoClickTimeoutRef.current = undefined;
                         const carousel = event.currentTarget;
                         paintStretchingDot(
                             rootRef.current!,
@@ -1471,11 +1505,16 @@ const FeedItem: React.FC<FeedItemProps> = ({
                                 onOpenPhoto ? () => openPhoto(index) : undefined
                             }
                             shouldLoad={
-                                (shouldPreloadVideo && Boolean(photo.video)) ||
+                                (shouldPreloadVideo &&
+                                    videoPreloadIndices.includes(index)) ||
                                 (shouldLoadMedia &&
                                     Math.abs(index - photoIndex) <= 1)
                             }
-                            shouldPreloadVideo={shouldPreloadVideo}
+                            shouldMountVideo={shouldPreloadVideo}
+                            shouldPreloadVideo={
+                                shouldPreloadVideo &&
+                                videoPreloadIndices.includes(index)
+                            }
                             thumbHash={photo.thumbHash}
                             video={photo.video}
                             viewerOrigin={
@@ -1749,7 +1788,7 @@ const FeedItem: React.FC<FeedItemProps> = ({
                             onOpenPhoto && (
                                 <SpacePostInputButton
                                     label="Reply privately"
-                                    placeholder="Send a message…"
+                                    placeholder="Reply privately…"
                                     backgroundColor={feedActionBackground}
                                     hoverBackgroundColor={
                                         feedActionBackgroundHover

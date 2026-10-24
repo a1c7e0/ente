@@ -4,8 +4,10 @@ import "package:ente_components/ente_components.dart";
 import "package:ente_strings/ente_strings.dart";
 import 'package:flutter/material.dart';
 import "package:hugeicons/hugeicons.dart";
+import "package:photos/core/configuration.dart";
 import "package:photos/core/event_bus.dart";
 import "package:photos/events/album_sort_order_change_event.dart";
+import "package:photos/events/collection_meta_event.dart";
 import "package:photos/events/collection_updated_event.dart";
 import 'package:photos/models/collection/collection.dart';
 import 'package:photos/models/collection/collection_items.dart';
@@ -50,6 +52,7 @@ class CollectionListPage extends StatefulWidget {
 }
 
 class _CollectionListPageState extends State<CollectionListPage> {
+  late StreamSubscription<CollectionMetaEvent> _collectionMetaEventSubscription;
   late StreamSubscription<CollectionUpdatedEvent>
   _collectionUpdatesSubscription;
   List<Collection>? collections;
@@ -65,6 +68,16 @@ class _CollectionListPageState extends State<CollectionListPage> {
   void initState() {
     super.initState();
     collections = widget.collections;
+    _collectionMetaEventSubscription = Bus.instance
+        .on<CollectionMetaEvent>()
+        .where((event) => event.type == CollectionMetaEventType.orderChanged)
+        .listen((_) {
+          if (widget.sectionType == UISectionType.archivedCollections ||
+              widget.sectionType == UISectionType.incomingCollections ||
+              widget.sectionType == UISectionType.outgoingCollections) {
+            unawaited(refreshCollections());
+          }
+        });
     _collectionUpdatesSubscription = Bus.instance
         .on<CollectionUpdatedEvent>()
         .listen((event) async {
@@ -81,6 +94,7 @@ class _CollectionListPageState extends State<CollectionListPage> {
 
   @override
   void dispose() {
+    _collectionMetaEventSubscription.cancel();
     _collectionUpdatesSubscription.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -305,6 +319,17 @@ class _CollectionListPageState extends State<CollectionListPage> {
         sortKey: currentSortKey,
         sortDirection: currentSortDirection,
       );
+      if (sectionType == UISectionType.archivedCollections) {
+        final userID = Configuration.instance.getUserID();
+        bool isPinnedForCurrentUser(Collection collection) =>
+            userID != null && !collection.isOwner(userID)
+            ? collection.hasShareePinned()
+            : collection.isPinned;
+        nextCollections = [
+          ...nextCollections.where(isPinnedForCurrentUser),
+          ...nextCollections.where((c) => !isPinnedForCurrentUser(c)),
+        ];
+      }
     }
     if (!mounted || generation != _refreshGeneration) {
       return;
