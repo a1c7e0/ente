@@ -1,6 +1,6 @@
 import { FavouriteIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Box, Dialog, Skeleton, useMediaQuery } from "@mui/material";
+import { Box, CircularProgress, Dialog, useMediaQuery } from "@mui/material";
 import { SpaceActivityAvatar } from "components/ActivityList";
 import { SpaceBottomSheetTransition } from "components/BottomSheetTransition";
 import type { FriendProfile } from "data/friends";
@@ -224,7 +224,7 @@ export const SpacePostLikes = ({
                             display: "flex",
                             flexDirection: "column",
                             fontFamily: '"Inter Variable", Inter, sans-serif',
-                            height: "min(72dvh, 640px)",
+                            height: 316,
                             left: 0,
                             m: 0,
                             maxHeight:
@@ -233,10 +233,11 @@ export const SpacePostLikes = ({
                             overflow: "hidden",
                             position: "fixed",
                             width: "100vw",
-                            pb: "calc(20px + env(safe-area-inset-bottom))",
+                            pb: 0,
                             "@media (min-width: 600px)": {
                                 borderRadius: "20px",
                                 bottom: "auto",
+                                height: "min(40dvh, 360px)",
                                 left: "50%",
                                 top: "50%",
                                 transform: "translate(-50%, -50%)",
@@ -384,35 +385,29 @@ export const SpacePostLikes = ({
                             </Box>
                         </Box>
                     ) : !actors ? (
-                        <Box role="status" aria-label="Loading likes">
-                            {[0, 1, 2].map((index) => (
-                                <Box
-                                    key={index}
-                                    sx={{
-                                        alignItems: "center",
-                                        display: "flex",
-                                        gap: "12px",
-                                        minHeight: 56,
-                                        py: "8px",
-                                    }}
-                                >
-                                    <Skeleton
-                                        variant="circular"
-                                        width={32}
-                                        height={32}
-                                    />
-                                    <Skeleton width={120} height={24} />
-                                </Box>
-                            ))}
+                        <Box
+                            sx={{
+                                alignItems: "center",
+                                display: "flex",
+                                height: "100%",
+                                justifyContent: "center",
+                            }}
+                        >
+                            <CircularProgress
+                                aria-label="Loading likes"
+                                size={20}
+                                sx={{ color: spaceTextMuted }}
+                            />
                         </Box>
                     ) : actors.length == 0 ? (
                         <Box
                             sx={{
-                                alignItems: "center",
                                 color: spaceTextMuted,
-                                display: "flex",
-                                height: "100%",
-                                justifyContent: "center",
+                                position: "absolute",
+                                top: "calc(50% + 8px)",
+                                left: 20,
+                                right: 20,
+                                transform: "translateY(-50%)",
                                 textAlign: "center",
                                 fontSize: 14,
                             }}
@@ -422,7 +417,13 @@ export const SpacePostLikes = ({
                     ) : (
                         <Box
                             component="ul"
-                            sx={{ listStyle: "none", m: 0, p: 0 }}
+                            sx={{
+                                listStyle: "none",
+                                m: 0,
+                                p: 0,
+                                pb: "calc(8px + env(safe-area-inset-bottom))",
+                                "@media (min-width: 600px)": { pb: 0 },
+                            }}
                         >
                             {actors.map((actor) => (
                                 <LikeRow

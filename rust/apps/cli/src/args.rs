@@ -5,7 +5,12 @@ use clap_complete::Shell;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
-#[command(name = "ente", version, about = "Ente client for terminals and agents")]
+#[command(
+    name = "ente",
+    version,
+    about = "Ente client for terminals and agents",
+    after_help = "Documentation: https://ente.com/help/cli/"
+)]
 pub struct Cli {
     #[command(flatten, next_help_heading = "Global options")]
     pub options: Options,
@@ -820,10 +825,10 @@ pub enum AdminCommand {
 pub enum AdminUserCommand {
     #[command(
         about = "List users",
-        after_long_help = "Requires a login less than ten minutes old.
-Lists users in creation order. Fetches all users matching --since before applying --limit.
+        after_long_help = "Lists users in creation order. Fetches all users matching --since before applying --limit.
 --since accepts YYYY-MM-DD (midnight UTC) or RFC3339 with a timezone.
 JSON returns an array: id and email (strings), createdAt (RFC3339).
+Requires a login less than ten minutes old.
 
 Example:
   ente admin --account home user list --all --no-input --json"
@@ -850,7 +855,8 @@ Example:
     #[command(
         about = "Delete an account and schedule its data cleanup",
         after_long_help = "Deletes the account registered to the supplied email when the server processes the request.
-Requires a login less than ten minutes old. Reports the deleted account's ID and whether the server cancelled the subscription."
+Reports the deleted account's ID and whether the server cancelled the subscription.
+Requires a login less than ten minutes old."
     )]
     Delete {
         #[arg(help = "Email address of the account to delete")]
@@ -860,12 +866,14 @@ Requires a login less than ten minutes old. Reports the deleted account's ID and
     },
     #[command(
         about = "Disable authenticator-code two-factor authentication",
-        after_long_help = "Requires a login less than ten minutes old. Does not change passkeys."
+        after_long_help = "Does not change passkeys.
+Requires a login less than ten minutes old."
     )]
     DisableTotp(AdminTarget),
     #[command(
         about = "Remove all of a user's passkeys",
-        after_long_help = "Does not change authenticator-code two-factor authentication."
+        after_long_help = "Does not change authenticator-code two-factor authentication.
+Requires a login less than ten minutes old."
     )]
     RemovePasskeys(AdminTarget),
     #[command(
