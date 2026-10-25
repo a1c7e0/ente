@@ -72,10 +72,14 @@ APK workflow 移除了遗留的单项应用矩阵和 Locker 参数分支。Photo
 
 #14053 的 [自动审查记录](https://github.com/ente/ente/actions/runs/40105856901) 不等于人工批准或合并。后续状态变化时应更新本表。项目的 [贡献指南](https://github.com/ente/ente/blob/eb994dbbaf2b181a049a19ae3e711123f7ce6454/CONTRIBUTING.md) 要求改动聚焦、验证所触及的行为；相似症状不必自动捆成一个大型上游 PR。
 
+## 本轮上游同步与组合验证
+
+本分支已同步上游 `65fa47f765`，没有代码冲突。main、修复分支也同步到同一上游基线；上游 PR 的干净分支保持原状。组合验证在本集成分支执行，共 435 项测试通过，并通过应用和相关测试文件分析；真实 ONNX 模型契约检查也通过。范围、环境、构建入口及未完成的实机验证见 [本轮验证记录](integration-verification-2026-10-25.zh-CN.md)。
+
 ## 构建与验证边界
 
 main 发布 Server 和完整 Web 镜像，分别是 `ghcr.io/a1c7e0/server` 和 `ghcr.io/a1c7e0/web`；相关目录变更自动触发，也支持手动触发，使用按包/架构隔离的构建缓存。Photos APK 始终手动触发，复用 Flutter、Dart、Cargo 和 Gradle 缓存；发布产物不代表部署服务。
 
-整理前的 `8a3f9bf3ad` 已完成 [APK 构建](https://github.com/a1c7e0/ente/actions/runs/40158206853) 和 [独立 CI](https://github.com/a1c7e0/ente/actions/runs/40158208798)，均成功。本轮整理另通过 57 项定向 Flutter 测试、Photos 静态分析、格式检查、actionlint 和内嵌 Python 语法检查，未重新触发 APK 构建。因此现有 Release APK 尚不包含本轮整理提交。
+整理前的 `8a3f9bf3ad` 已完成 [APK 构建](https://github.com/a1c7e0/ente/actions/runs/40158206853) 和 [独立 CI](https://github.com/a1c7e0/ente/actions/runs/40158208798)，均成功。上一轮整理另通过 57 项定向 Flutter 测试、Photos 静态分析、格式检查、actionlint 和内嵌 Python 语法检查，该轮未重新触发 APK 构建。本次同步版构建和更完整的验证见上节；核对产物 COMMIT 后再测试。
 
 用户的真实相册、模型准确率、跨设备同步体验和手机端性能仍需要实机测试。构建、定向测试、自动审查、人工批准和上游合并分别记录，不能相互替代。
