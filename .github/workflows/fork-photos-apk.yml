@@ -13,15 +13,10 @@ concurrency:
 jobs:
     build:
         if: github.repository == 'a1c7e0/ente' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/ml-lab' || github.ref == 'refs/heads/feat/face-profile-review' || github.ref == 'refs/heads/feat/integration-test' || github.ref == 'refs/heads/fix/review-feedback-refresh')
-        name: Build ${{ matrix.app }} arm64 APK
-        strategy:
-            fail-fast: false
-            matrix:
-                app: [photos]
+        name: Build Photos arm64 APK
         runs-on: ubuntu-24.04
         timeout-minutes: 90
         env:
-            APP: ${{ matrix.app }}
             APK_CHANNEL: ${{ github.ref == 'refs/heads/fix/review-feedback-refresh' && 'review-feedback' || github.ref == 'refs/heads/feat/integration-test' && 'integration' || github.ref == 'refs/heads/feat/ml-lab' && 'ml-lab' || github.ref == 'refs/heads/feat/face-profile-review' && 'face-profile-review' || 'main' }}
             ML_DIAGNOSTICS: ${{ github.ref == 'refs/heads/feat/ml-lab' || github.ref == 'refs/heads/feat/integration-test' }}
             CARGO_BUILD_JOBS: 2
@@ -46,8 +41,8 @@ jobs:
                   java-version: "17"
                   cache: gradle
                   cache-dependency-path: |
-                      mobile/apps/${{ matrix.app }}/android/**/*.gradle*
-                      mobile/apps/${{ matrix.app }}/android/gradle/wrapper/gradle-wrapper.properties
+                      mobile/apps/photos/android/**/*.gradle*
+                      mobile/apps/photos/android/gradle/wrapper/gradle-wrapper.properties
                       mobile/gradle/**
                       mobile/pubspec.lock
 
@@ -74,7 +69,7 @@ jobs:
                   echo 'org.gradle.workers.max=2' >> "$HOME/.gradle/gradle.properties"
                   cat > "$HOME/.gradle/init.d/photos-arm64.gradle" <<'EOF'
                   allprojects { p ->
-                      if (p.rootDir.canonicalPath != new File(System.getenv('GITHUB_WORKSPACE'), "mobile/apps/${System.getenv('APP')}/android").canonicalPath) return
+                      if (p.rootDir.canonicalPath != new File(System.getenv('GITHUB_WORKSPACE'), "mobile/apps/photos/android").canonicalPath) return
                       p.afterEvaluate {
                           if (p.path == ':app') {
                               def android = p.extensions.findByName('android')
@@ -122,11 +117,11 @@ jobs:
               id: rust-build-key
               shell: bash
               env:
-                  BUILD_INPUTS: ${{ hashFiles('rust/**/Cargo.toml', 'rust/Cargo.lock', 'mobile/pubspec.lock', 'mobile/cargokit/**', format('mobile/apps/{0}/android/**/*.gradle*', matrix.app), 'mobile/gradle/**', '.github/actions/setup-flutter/action.yml') }}
+                  BUILD_INPUTS: ${{ hashFiles('rust/**/Cargo.toml', 'rust/Cargo.lock', 'mobile/pubspec.lock', 'mobile/cargokit/**', 'mobile/apps/photos/android/**/*.gradle*', 'mobile/gradle/**', '.github/actions/setup-flutter/action.yml') }}
               run: |
                   compiler="$(rustc -vV | sha256sum | cut -d ' ' -f 1)"
-                  echo "prefix=${APP}-rust-v1-${APK_CHANNEL}-${ImageOS}-${ImageVersion}-${compiler}-${BUILD_INPUTS}" >> "$GITHUB_OUTPUT"
-                  echo "compat-prefix=${APP}-rust-v1-${APK_CHANNEL}-${ImageOS}-${ImageVersion}-${compiler}" >> "$GITHUB_OUTPUT"
+                  echo "prefix=photos-rust-v1-${APK_CHANNEL}-${ImageOS}-${ImageVersion}-${compiler}-${BUILD_INPUTS}" >> "$GITHUB_OUTPUT"
+                  echo "compat-prefix=photos-rust-v1-${APK_CHANNEL}-${ImageOS}-${ImageVersion}-${compiler}" >> "$GITHUB_OUTPUT"
 
             - name: Restore Rust build outputs
               id: rust-build-cache
@@ -138,7 +133,7 @@ jobs:
                       ${{ steps.rust-build-key.outputs.compat-prefix }}-
                   path: |
                       rust/target
-                      mobile/apps/${{ matrix.app }}/build/ente_${{ matrix.app }}_frb/build
+                      mobile/apps/photos/build/ente_photos_frb/build
 
             # Reuse upstream's content-aware timestamp restoration so an unchanged
             # checkout does not invalidate Cargo's restored compilation artifacts.
@@ -147,7 +142,7 @@ jobs:
               run: node .github/actions/restore-rust-target/mtimes.mjs restore
 
             - name: Resolve locked dependencies
-              working-directory: mobile/apps/${{ matrix.app }}
+              working-directory: mobile/apps/photos
               run: flutter pub get --enforce-lockfile
 
             # Save before later tests/build/release steps can fail; the cache
@@ -163,7 +158,7 @@ jobs:
 
             - name: Generate Flutter bindings
               working-directory: rust
-              run: cargo codegen frb "$APP"
+              run: cargo codegen frb photos
 
             - name: Save Rust dependencies
               if: steps.cargo-cache.outputs.cache-hit != 'true'
@@ -174,8 +169,8 @@ jobs:
                       ~/.cargo/registry
                       ~/.cargo/git
 
-            - name: Build ${{ matrix.app }} arm64 release APK
-              working-directory: mobile/apps/${{ matrix.app }}
+            - name: Build Photos arm64 release APK
+              working-directory: mobile/apps/photos
               run: flutter build apk --release --flavor dev --target-platform android-arm64 --split-per-abi --dart-define=enteDeveloperTools=true --dart-define=cronetHttpNoPlay=true --dart-define=enteMLDiagnostics=$ML_DIAGNOSTICS --build-number=$((1000000 + GITHUB_RUN_NUMBER))
 
             - name: Collect APK
@@ -187,35 +182,33 @@ jobs:
                   from pathlib import Path
                   import shutil
                   import os
-                  app = os.environ['APP']
-                  output = Path(f'mobile/apps/{app}/build/app/outputs/flutter-apk')
+                  output = Path('mobile/apps/photos/build/app/outputs/flutter-apk')
                   candidates = list(output.glob('app-*arm64-v8a*release.apk'))
                   assert len(candidates) == 1, list(output.glob('*.apk'))
                   print(f'Collecting {candidates[0]}')
-                  shutil.copyfile(candidates[0], f"artifacts/ente-{app}-{os.environ['APK_CHANNEL']}-arm64.apk")
+                  shutil.copyfile(candidates[0], f"artifacts/ente-photos-{os.environ['APK_CHANNEL']}-arm64.apk")
                   PYTHON
                   printf '%s\n' "$BUILT_SHA" > artifacts/COMMIT
                   cd artifacts
-                  sha256sum "ente-${APP}-${APK_CHANNEL}-arm64.apk" > SHA256SUMS
+                  sha256sum "ente-photos-${APK_CHANNEL}-arm64.apk" > SHA256SUMS
 
             - name: Verify locked dependencies
               run: git diff --exit-code -- mobile/pubspec.lock
 
             - name: Verify artifact
               run: |
-                  "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "artifacts/ente-${APP}-${APK_CHANNEL}-arm64.apk" > artifacts/SIGNATURE.txt
+                  "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "artifacts/ente-photos-${APK_CHANNEL}-arm64.apk" > artifacts/SIGNATURE.txt
                   cat artifacts/SIGNATURE.txt
-                  "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "artifacts/ente-${APP}-${APK_CHANNEL}-arm64.apk"
+                  "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 4 "artifacts/ente-photos-${APK_CHANNEL}-arm64.apk"
                   python3 - <<'PYTHON'
                   import zipfile
                   import os
-                  app = os.environ['APP']
-                  with zipfile.ZipFile(f"artifacts/ente-{app}-{os.environ['APK_CHANNEL']}-arm64.apk") as apk:
+                  with zipfile.ZipFile(f"artifacts/ente-photos-{os.environ['APK_CHANNEL']}-arm64.apk") as apk:
                       assert apk.testzip() is None, 'APK ZIP integrity check failed'
                       libraries = [p for p in apk.namelist() if p.startswith('lib/') and p.endswith('.so')]
                       print('Native libraries:', libraries)
                       assert {p.split('/')[1] for p in libraries} == {'arm64-v8a'}, libraries
-                      assert f'lib/arm64-v8a/libente_{app}_frb.so' in libraries
+                      assert 'lib/arm64-v8a/libente_photos_frb.so' in libraries
                       assert 'lib/arm64-v8a/libonnxruntime.so' in libraries
                   PYTHON
 
@@ -230,12 +223,12 @@ jobs:
                   key: ${{ steps.rust-build-cache.outputs.cache-primary-key }}
                   path: |
                       rust/target
-                      mobile/apps/${{ matrix.app }}/build/ente_${{ matrix.app }}_frb/build
+                      mobile/apps/photos/build/ente_photos_frb/build
 
             - name: Upload APK
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
-                  name: ente-${{ matrix.app }}-${{ env.APK_CHANNEL }}-arm64
+                  name: ente-photos-${{ env.APK_CHANNEL }}-arm64
                   path: artifacts/
                   if-no-files-found: error
                   retention-days: 7
@@ -245,22 +238,22 @@ jobs:
                   GH_TOKEN: ${{ github.token }}
                   GH_REPO: ${{ github.repository }}
               run: |
-                  tag="${APP}-${APK_CHANNEL}-test"
+                  tag="photos-${APK_CHANNEL}-test"
                   if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
                       signature_note="Consecutive builds on the same channel use the same test signing key, so they can update an existing installation."
                   else
                       signature_note="This build used an ephemeral signature; configure the fork test-signing secrets to update an existing installation."
                   fi
-                  if [ "$APP" = photos ] && [ "$APK_CHANNEL" = integration ]; then
+                  if [ "$APK_CHANNEL" = integration ]; then
                       app_note="Photos integration uses the ML Lab application ID and can update that installation."
                   else
                       app_note="Install this APK alongside other Ente apps according to its configured application ID."
                   fi
-                  notes="${APP} ${APK_CHANNEL} arm64 test candidate built from ${GITHUB_SHA}. ${signature_note} ${app_note} See architecture/fork-testing.md and architecture/integration-test-checklist.zh.md."
+                  notes="photos ${APK_CHANNEL} arm64 test candidate built from ${GITHUB_SHA}. ${signature_note} ${app_note} See architecture/fork-testing.md and architecture/integration-test-checklist.zh.md."
                   if gh release view "$tag" >/dev/null 2>&1; then
                       gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/${tag}" -f sha="$GITHUB_SHA" -F force=true
                       gh release upload "$tag" artifacts/* --clobber
                       gh release edit "$tag" --notes "$notes"
                   else
-                      gh release create "$tag" artifacts/* --target "$GITHUB_SHA" --title "${APP} ${APK_CHANNEL} arm64 test APK" --notes "$notes" --prerelease --latest=false
+                      gh release create "$tag" artifacts/* --target "$GITHUB_SHA" --title "photos ${APK_CHANNEL} arm64 test APK" --notes "$notes" --prerelease --latest=false
                   fi
