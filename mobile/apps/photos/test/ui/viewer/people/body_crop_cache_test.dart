@@ -1,5 +1,4 @@
 import "dart:io";
-import "dart:typed_data";
 
 import "package:flutter/services.dart";
 import "package:flutter_test/flutter_test.dart";
@@ -20,7 +19,7 @@ void main() {
 
   BodyDetection body(String id) => BodyDetection(
     bodyID: id,
-    box: FaceBox(x: 0.1, y: 0.1, width: 0.3, height: 0.7),
+    box: const FaceBox(x: 0.1, y: 0.1, width: 0.3, height: 0.7),
     score: 0.9,
     embedding: const [],
   );
