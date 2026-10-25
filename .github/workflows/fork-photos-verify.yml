@@ -92,6 +92,15 @@ jobs:
               working-directory: mobile/apps/photos
               run: flutter test --no-pub test/models/ml/face/person_cache_test.dart test/services/machine_learning/ml_photo_reset_service_test.dart test/services/machine_learning/metadata_sync_lock_test.dart
 
+            - name: Verify review feedback and client cache refresh
+              working-directory: mobile/apps/photos
+              run: |
+                  flutter test --no-pub test/ui/viewer/people/review_suggestion_changes_test.dart test/ui/viewer/people/review_suggestion_refresh_test.dart test/ui/viewer/people/review_feedback_flow_test.dart test/ui/viewer/people/person_face_widget_test.dart test/utils/face/face_crop_request_queue_test.dart test/services/machine_learning/body_feedback_service_test.dart test/services/collections_service_display_cache_test.dart test/services/search_file_cache_test.dart test/services/account/user_details_session_test.dart
+
+            - name: Verify shared account session refresh
+              working-directory: mobile/packages/accounts
+              run: flutter test --no-pub test/services/user_service_test.dart
+
             - name: Verify ML Lab diagnostics
               if: github.ref == 'refs/heads/feat/ml-lab' || github.ref == 'refs/heads/feat/integration-test'
               working-directory: mobile/apps/photos
