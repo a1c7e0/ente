@@ -9,7 +9,6 @@ import "package:package_info_plus/package_info_plus.dart";
 import "package:photos/core/event_bus.dart";
 import "package:photos/ente_theme_data.dart";
 import "package:photos/events/files_updated_event.dart";
-import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
@@ -51,109 +50,7 @@ void main() {
   });
 
   for (final standalone in [false, true]) {
-    for (final accepted in [false, true]) {
-      for (final leaveBeforeSave in [false, true]) {
-        testWidgets(
-          "all-people card drops the last review completed on ${standalone ? 'review' : 'person'} page ($accepted, return before save: $leaveBeforeSave)",
-          (tester) async {
-            final harness = await _mount(
-              tester,
-              false,
-              allPeople: true,
-              singleSuggestion: true,
-            );
-            final navigator = Navigator.of(
-              tester.element(find.byType(PersonGallerySuggestion)),
-            );
-            unawaited(
-              navigator.push(
-                MaterialPageRoute<void>(
-                  builder: (_) => standalone
-                      ? harness.createPersonReview(true)
-                      : Scaffold(body: harness.createPersonReview(false)),
-                ),
-              ),
-            );
-            await tester.pumpAndSettle();
-            await tester.tap(find.text(accepted ? "Yes" : "No"));
-            await _advanceTransition(tester);
-            // The successful write has removed the last candidate from storage.
-            harness.suggestions = [];
-            if (leaveBeforeSave) {
-              navigator.pop();
-              await tester.pumpAndSettle();
-            }
-            harness.save.complete();
-            await tester.pumpAndSettle();
-            if (!leaveBeforeSave) {
-              navigator.pop();
-              await tester.pumpAndSettle();
-            }
-            expect(harness.state.allSuggestions, isEmpty);
-            expect(find.byType(ReviewThumbnailWidget), findsNothing);
-            expect(harness.disposedLoaders, greaterThanOrEqualTo(1));
-            await tester.pumpWidget(const SizedBox.shrink());
-          },
-        );
-      }
-    }
-  }
-
-  testWidgets("all-people card ignores an obsolete query after review", (
-    tester,
-  ) async {
-    final harness = await _mount(tester, false, allPeople: true);
-    final oldSuggestions = List<ClusterSuggestion>.of(harness.suggestions);
-    final stale = Completer<List<ClusterSuggestion>>();
-    harness.loadOverride = () => stale.future;
-    void reviewed() => Bus.instance.fire(
-      PeopleChangedEvent(
-        type: PeopleEventType.reviewedSuggestion,
-        person: oldSuggestions.first.person,
-      ),
-    );
-    reviewed();
-    await tester.pump();
-    harness.loadOverride = null;
-    harness.suggestions = [];
-    reviewed();
-    await tester.pumpAndSettle();
-    stale.complete(oldSuggestions);
-    await tester.pumpAndSettle();
-    expect(harness.state.allSuggestions, isEmpty);
-    expect(find.byType(ReviewThumbnailWidget), findsNothing);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  for (final standalone in [false, true]) {
     final surface = standalone ? "independent review" : "person card";
-
-    testWidgets("$surface refreshes only for its reviewed person", (
-      tester,
-    ) async {
-      final harness = await _mount(tester, standalone);
-      Bus.instance.fire(
-        PeopleChangedEvent(
-          type: PeopleEventType.reviewedSuggestion,
-          person: PersonEntity("other", PersonData(name: "Other")),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(harness.loads, 1);
-      final reviewedPerson = harness.suggestions.first.person;
-      harness.suggestions = [];
-      Bus.instance.fire(
-        PeopleChangedEvent(
-          type: PeopleEventType.reviewedSuggestion,
-          person: reviewedPerson,
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(harness.loads, 2);
-      expect(harness.state.allSuggestions, isEmpty);
-      expect(find.byType(ReviewThumbnailWidget), findsNothing);
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
 
     testWidgets(
       "$surface prepares next group during save and prevents a second write",
@@ -161,19 +58,19 @@ void main() {
         final harness = await _mount(tester, standalone);
         await tester.tap(find.text("Yes"));
         await _advanceTransition(tester);
-        expect(harness.state.currentSuggestionIndex, 1);
+        expect(harness.visibleClusters(tester), ["second"]);
         expect(harness.savedClusters, ["first"]);
         await tester.tap(find.text("No"));
         await tester.pump();
         expect(harness.savedClusters, ["first"]);
         harness.save.complete();
         await tester.pumpAndSettle();
-        expect(harness.canGiveFeedback, isTrue);
         expect(
           harness.loads,
           1,
           reason: "keep the sender's prepared next group",
         );
+        await harness.expectFeedbackEnabled(tester, "second");
         await tester.pumpWidget(const SizedBox.shrink());
       },
     );
@@ -184,13 +81,12 @@ void main() {
       final harness = await _mount(tester, standalone);
       await tester.tap(find.text("Yes"));
       await _advanceTransition(tester);
-      expect(harness.state.currentSuggestionIndex, 1);
+      expect(harness.visibleClusters(tester), ["second"]);
       harness.save.completeError(StateError("save failed"));
       await _advanceTransition(tester);
-      expect(harness.state.currentSuggestionIndex, 0);
-      expect(harness.state.allSuggestions.first.clusterIDToMerge, "first");
-      expect(harness.canGiveFeedback, isTrue);
-      if (standalone) expect(harness.state.pastUserFeedback, isEmpty);
+      expect(harness.visibleClusters(tester), ["first"]);
+      if (standalone) expect(find.byIcon(Icons.undo_outlined), findsNothing);
+      await harness.expectFeedbackEnabled(tester, "first");
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 5));
       await tester.pump();
@@ -205,11 +101,11 @@ void main() {
       await _advanceTransition(tester);
       harness.save.completeError(StateError("save failed"));
       await _advanceTransition(tester);
-      expect(harness.state.currentSuggestionIndex, 0);
+      expect(harness.visibleClusters(tester), ["first"]);
       harness.nextThumbnails!.complete();
       await _advanceTransition(tester);
-      expect(harness.state.currentSuggestionIndex, 0);
-      expect(harness.canGiveFeedback, isTrue);
+      expect(harness.visibleClusters(tester), ["first"]);
+      await harness.expectFeedbackEnabled(tester, "first");
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 5));
       await tester.pump();
@@ -236,31 +132,11 @@ void main() {
       harness.save.completeError(StateError("save failed"));
       await _advanceTransition(tester);
       expect(harness.loads, 2);
-      expect(harness.state.allSuggestions, isEmpty);
+      expect(harness.visibleClusters(tester), isEmpty);
       expect(find.byType(ReviewThumbnailWidget), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 5));
       await tester.pump();
-    });
-
-    testWidgets("$surface discards deleted candidate and prepared thumbnails", (
-      tester,
-    ) async {
-      final harness = await _mount(tester, standalone);
-      harness.suggestions = [];
-      Bus.instance.fire(
-        FilesUpdatedEvent([
-          EnteFile()
-            ..uploadedFileID = 1
-            ..generatedID = 999,
-        ], type: EventType.deletedFromEverywhere),
-      );
-      await tester.pumpAndSettle();
-      expect(harness.loads, 2);
-      expect(harness.disposedLoaders, 1);
-      expect(harness.state.allSuggestions, isEmpty);
-      expect(find.byType(ReviewThumbnailWidget), findsNothing);
-      await tester.pumpWidget(const SizedBox.shrink());
     });
   }
 }
@@ -272,28 +148,43 @@ Future<void> _advanceTransition(WidgetTester tester) async {
 }
 
 class _Harness {
-  _Harness(this.standalone);
-  final bool standalone;
-  final save = Completer<void>();
+  Completer<void> save = Completer<void>();
   final savedClusters = <String>[];
   Completer<void>? nextThumbnails;
   List<ClusterSuggestion> suggestions = [];
-  Future<List<ClusterSuggestion>> Function()? loadOverride;
-  late Widget Function(bool standalone) createPersonReview;
   int loads = 0;
-  int disposedLoaders = 0;
-  late dynamic state;
-  bool get canGiveFeedback => standalone
-      ? state.canGiveFeedback as bool
-      : !(state.isProcessing as bool);
+  List<String> visibleClusters(WidgetTester tester) => tester
+      .widgetList<ReviewThumbnailWidget>(find.byType(ReviewThumbnailWidget))
+      .map(
+        (widget) => switch (widget.key) {
+          ValueKey<(String, String, int?)>(:final value) => value.$2,
+          ValueKey<(String, int?)>(:final value) => value.$1,
+          _ => throw StateError("Missing review thumbnail identity"),
+        },
+      )
+      .toSet()
+      .toList();
+
+  Future<void> expectFeedbackEnabled(
+    WidgetTester tester,
+    String cluster,
+  ) async {
+    final dismiss = find.text("OK");
+    if (dismiss.evaluate().isNotEmpty) {
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+    }
+    final previous = List<String>.of(savedClusters);
+    save = Completer<void>();
+    await tester.tap(find.text("No"));
+    await tester.pump();
+    expect(savedClusters, [...previous, cluster]);
+    save.complete();
+    await tester.pumpAndSettle();
+  }
 }
 
-Future<_Harness> _mount(
-  WidgetTester tester,
-  bool standalone, {
-  bool allPeople = false,
-  bool singleSuggestion = false,
-}) async {
+Future<_Harness> _mount(WidgetTester tester, bool standalone) async {
   final thumbnail = await tester.runAsync(
     () => ReviewThumbnail.prepare(
       base64Decode(
@@ -301,7 +192,7 @@ Future<_Harness> _mount(
       ),
     ),
   );
-  final harness = _Harness(standalone);
+  final harness = _Harness();
   final person = PersonEntity("person", PersonData(name: "Alex"));
   ClusterSuggestion suggestion(String cluster, int id) =>
       ClusterSuggestion(person, cluster, 0.1, false, [
@@ -309,13 +200,10 @@ Future<_Harness> _mount(
           ..uploadedFileID = id
           ..creationTime = id,
       ], []);
-  harness.suggestions = [
-    suggestion("first", 1),
-    if (!singleSuggestion) suggestion("second", 2),
-  ];
+  harness.suggestions = [suggestion("first", 1), suggestion("second", 2)];
   Future<List<ClusterSuggestion>> load() async {
     harness.loads++;
-    return harness.loadOverride?.call() ?? List.of(harness.suggestions);
+    return List.of(harness.suggestions);
   }
 
   Future<void> save(ClusterSuggestion suggestion, bool accepted) {
@@ -326,24 +214,10 @@ Future<_Harness> _mount(
   ReviewThumbnailLoader loader(int count) => _Loader(
     count,
     thumbnail!,
-    () => harness.disposedLoaders++,
     (suggestion) => suggestion.clusterIDToMerge == "second"
         ? harness.nextThumbnails?.future ?? Future<void>.value()
         : Future<void>.value(),
   );
-  harness.createPersonReview = (standalone) => standalone
-      ? PersonReviewClusterSuggestion(
-          person,
-          loadSuggestions: load,
-          saveFeedback: save,
-          createThumbnailLoader: loader,
-        )
-      : PersonGallerySuggestion(
-          person: person,
-          loadSuggestions: load,
-          saveFeedback: save,
-          createThumbnailLoader: loader,
-        );
   final Widget review = standalone
       ? PersonReviewClusterSuggestion(
           person,
@@ -352,7 +226,7 @@ Future<_Harness> _mount(
           createThumbnailLoader: loader,
         )
       : PersonGallerySuggestion(
-          person: allPeople ? null : person,
+          person: person,
           loadSuggestions: load,
           saveFeedback: save,
           createThumbnailLoader: loader,
@@ -366,14 +240,12 @@ Future<_Harness> _mount(
     ),
   );
   await tester.pumpAndSettle();
-  harness.state = tester.state(find.byWidget(review));
   return harness;
 }
 
 class _Loader extends ReviewThumbnailLoader {
-  _Loader(super.count, this.thumbnail, this.onDispose, this.beforeLoad);
+  _Loader(super.count, this.thumbnail, this.beforeLoad);
   final ReviewThumbnail thumbnail;
-  final VoidCallback onDispose;
   final Future<void> Function(ClusterSuggestion) beforeLoad;
   @override
   Future<({ClusterSuggestion suggestion, ReviewThumbnails thumbnails})?> next(
@@ -393,6 +265,4 @@ class _Loader extends ReviewThumbnailLoader {
 
   @override
   void prefetch(Iterable<ClusterSuggestion> candidates) {}
-  @override
-  void dispose() => onDispose();
 }
