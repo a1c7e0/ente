@@ -7,96 +7,142 @@ import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedba
 import "package:photos/ui/viewer/people/review_suggestion_changes.dart";
 
 void main() {
+  const affected = reviewSuggestionsAffectedBy;
   final person = PersonEntity("person", PersonData(name: "Alex"));
-  ClusterSuggestion suggestion(String clusterID) =>
-      ClusterSuggestion(person, clusterID, 0.1, false, [
-        EnteFile()
-          ..uploadedFileID = 7
-          ..generatedID = 10,
-      ], []);
-  for (final clusterID in ["face-cluster", "body-group:example"]) {
-    final candidates = [suggestion(clusterID)];
-    test("$clusterID invalidates deleted photos by uploaded ID", () {
+  final candidates = [
+    ClusterSuggestion(person, "cluster", 0.1, false, [
+      EnteFile()
+        ..uploadedFileID = 7
+        ..generatedID = 10,
+    ], []),
+  ];
+  FilesUpdatedEvent fileEvent(
+    EventType type, {
+    int id = 7,
+    String source = "",
+  }) => FilesUpdatedEvent(
+    [
+      EnteFile()
+        ..uploadedFileID = id
+        ..generatedID = 20,
+    ],
+    type: type,
+    source: source,
+  );
+
+  test(
+    "file changes match uploaded IDs and preserve move/decorative filters",
+    () {
+      for (final type in [
+        EventType.hide,
+        EventType.deletedFromRemote,
+        EventType.deletedFromEverywhere,
+      ]) {
+        expect(affected(fileEvent(type), candidates), isTrue);
+        expect(affected(fileEvent(type, id: 99), candidates), isFalse);
+      }
+      for (final loading in [false, true]) {
+        expect(
+          affected(
+            fileEvent(EventType.coverChanged),
+            candidates,
+            suggestionsLoading: loading,
+          ),
+          isFalse,
+        );
+        expect(
+          affected(
+            fileEvent(EventType.deletedFromRemote, source: "moveFrom"),
+            candidates,
+            suggestionsLoading: loading,
+          ),
+          isFalse,
+        );
+      }
+    },
+  );
+
+  test("group edits match cluster IDs once membership is known", () {
+    for (final type in [
+      PeopleEventType.removedFilesFromCluster,
+      PeopleEventType.removedFaceFromCluster,
+    ]) {
       expect(
-        reviewSuggestionsAffectedBy(
-          FilesUpdatedEvent([
-            EnteFile()
-              ..uploadedFileID = 7
-              ..generatedID = 20,
-          ], type: EventType.deletedFromEverywhere),
-          candidates,
-        ),
+        affected(PeopleChangedEvent(source: "cluster", type: type), candidates),
         isTrue,
       );
       expect(
-        reviewSuggestionsAffectedBy(
-          FilesUpdatedEvent([
-            EnteFile()..uploadedFileID = 8,
-          ], type: EventType.deletedFromEverywhere),
+        affected(PeopleChangedEvent(source: "other", type: type), candidates),
+        isFalse,
+      );
+    }
+  });
+
+  test(
+    "unscoped changes refresh background cards; preview edits are coalesced",
+    () {
+      expect(affected(PeopleChangedEvent(), candidates), isTrue);
+      expect(affected(PeopleChangedEvent(), const []), isTrue);
+      expect(affected(PeopleChangedEvent(person: person), candidates), isFalse);
+      expect(
+        affected(PeopleChangedEvent(source: "other"), candidates),
+        isFalse,
+      );
+      expect(
+        affected(
+          PeopleChangedEvent(type: PeopleEventType.syncDone),
           candidates,
         ),
         isFalse,
       );
-    });
-    test("$clusterID ignores move-from and decoration-only changes", () {
       expect(
-        reviewSuggestionsAffectedBy(
-          FilesUpdatedEvent(
-            candidates.first.filesInCluster,
-            source: "moveFrom",
-            type: EventType.deletedFromRemote,
-          ),
-          candidates,
-        ),
-        isFalse,
-      );
-      expect(
-        reviewSuggestionsAffectedBy(
-          FilesUpdatedEvent(
-            candidates.first.filesInCluster,
-            type: EventType.coverChanged,
-          ),
-          candidates,
-        ),
-        isFalse,
-      );
-    });
-    test("$clusterID requeries membership after a mixed-grouping edit", () {
-      expect(
-        reviewSuggestionsAffectedBy(
-          PeopleChangedEvent(
-            source: clusterID,
-            type: PeopleEventType.removedFaceFromCluster,
-            relevantFaceIDs: ["7_face"],
-          ),
-          candidates,
-        ),
-        isTrue,
-      );
-      expect(
-        reviewSuggestionsAffectedBy(
-          PeopleChangedEvent(
-            source: "other-cluster",
-            type: PeopleEventType.removedFilesFromCluster,
-          ),
-          candidates,
-        ),
-        isFalse,
-      );
-    });
-    test("$clusterID reloads after an unscoped group split in preview", () {
-      expect(
-        reviewSuggestionsAffectedBy(
-          PeopleChangedEvent(),
+        affected(
+          PeopleChangedEvent(person: person),
           candidates,
           previewOpen: true,
         ),
         isTrue,
       );
-      expect(
-        reviewSuggestionsAffectedBy(PeopleChangedEvent(), candidates),
-        isFalse,
+    },
+  );
+
+  test(
+    "pending queries invalidate even with a retained, unrelated snapshot",
+    () {
+      for (final snapshot in [<ClusterSuggestion>[], candidates]) {
+        expect(
+          affected(
+            fileEvent(EventType.hide, id: 99),
+            snapshot,
+            suggestionsLoading: true,
+          ),
+          isTrue,
+        );
+        expect(
+          affected(
+            PeopleChangedEvent(
+              source: "other",
+              type: PeopleEventType.removedFilesFromCluster,
+            ),
+            snapshot,
+            suggestionsLoading: true,
+          ),
+          isTrue,
+        );
+      }
+    },
+  );
+
+  test(
+    "review notifications refresh all-people or the affected person only",
+    () {
+      final event = PeopleChangedEvent(
+        type: PeopleEventType.reviewedSuggestion,
+        person: person,
       );
-    });
-  }
+      expect(affected(event, const []), isTrue);
+      expect(affected(event, const [], personID: "person"), isTrue);
+      expect(affected(event, candidates, personID: "other"), isFalse);
+    },
+  );
 }

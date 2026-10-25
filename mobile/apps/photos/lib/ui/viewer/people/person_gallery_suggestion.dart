@@ -4,6 +4,7 @@ import "package:ente_strings/ente_strings.dart";
 import 'package:flutter/material.dart';
 import "package:logging/logging.dart";
 import "package:photos/core/event_bus.dart";
+import "package:photos/events/event.dart";
 import "package:photos/events/files_updated_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/file.dart";
@@ -33,6 +34,8 @@ class PersonGallerySuggestion extends StatefulWidget {
   final Future<void> Function(ClusterSuggestion, bool)? saveFeedback;
   @visibleForTesting
   final ReviewThumbnailLoader Function(int count)? createThumbnailLoader;
+  @visibleForTesting
+  final Future<Object?> Function(Widget)? openPage;
 
   const PersonGallerySuggestion({
     required this.person,
@@ -40,6 +43,7 @@ class PersonGallerySuggestion extends StatefulWidget {
     this.loadSuggestions,
     this.saveFeedback,
     this.createThumbnailLoader,
+    this.openPage,
     super.key,
   });
 
@@ -81,39 +85,38 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     person = widget.person;
     _thumbnailLoader = _createThumbnailLoader();
     _initializeAnimations();
-    _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen((event) {
-      if (identical(event, _lastReviewedEvent)) return;
-      if (reviewSuggestionsAffectedBy(
-        event,
-        isProcessing
-            ? allSuggestions
-            : allSuggestions.skip(currentSuggestionIndex),
-        previewOpen: _previewOpen,
-      )) {
-        _invalidateSuggestions();
-      } else if (event.type == PeopleEventType.reviewedSuggestion &&
-          (!personPage || event.person?.remoteID == widget.person!.remoteID)) {
-        _invalidateSuggestions();
-      }
-    });
-    _filesUpdatedEvent = Bus.instance.on<FilesUpdatedEvent>().listen((event) {
-      if (reviewSuggestionsAffectedBy(
-        event,
-        isProcessing
-            ? allSuggestions
-            : allSuggestions.skip(currentSuggestionIndex),
-        previewOpen: _previewOpen,
-      )) {
-        _invalidateSuggestions();
-      }
-    });
+    _peopleChangedEvent = Bus.instance.on<PeopleChangedEvent>().listen(
+      _onSuggestionChanged,
+    );
+    _filesUpdatedEvent = Bus.instance.on<FilesUpdatedEvent>().listen(
+      _onSuggestionChanged,
+    );
     _loadInitialSuggestion();
   }
 
-  void _invalidateSuggestions() {
+  void _onSuggestionChanged(Event event) {
+    if (identical(event, _lastReviewedEvent)) return;
+    if (!reviewSuggestionsAffectedBy(
+      event,
+      isProcessing
+          ? allSuggestions
+          : allSuggestions.skip(currentSuggestionIndex),
+      previewOpen: _previewOpen,
+      suggestionsLoading: isLoading,
+      personID: widget.person?.remoteID,
+    )) {
+      return;
+    }
     _suggestionsInvalidated = true;
-    if (!_previewOpen && !isProcessing) {
-      unawaited(_reloadSuggestions());
+    if (!_previewOpen && !isProcessing) unawaited(_reloadSuggestions());
+  }
+
+  Future<void> _finishProcessing() async {
+    if (!mounted) return;
+    if (_suggestionsInvalidated) {
+      await _reloadSuggestions();
+    } else {
+      setState(() => isProcessing = false);
     }
   }
 
@@ -156,9 +159,6 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       } else {
         suggestions = await ClusterFeedbackService.instance
             .getAllLargePersonSuggestions();
-        if (suggestions.isNotEmpty) {
-          person = suggestions.first.person;
-        }
       }
 
       if (suggestions.isNotEmpty && mounted && loadID == _suggestionLoadID) {
@@ -260,6 +260,18 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     }
   }
 
+  Future<T?> _openPage<T>(Widget page) async {
+    _previewOpen = true;
+    try {
+      if (widget.openPage != null) return await widget.openPage!(page) as T?;
+      return await Navigator.of(
+        context,
+      ).push<T>(MaterialPageRoute(builder: (_) => page));
+    } finally {
+      _previewOpen = false;
+    }
+  }
+
   Future<void> _navigateToCluster() async {
     if (isProcessing ||
         allSuggestions.isEmpty ||
@@ -272,19 +284,14 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       currentSuggestion.filesInCluster,
     );
     sortedFiles.sort((a, b) => b.creationTime!.compareTo(a.creationTime!));
-    _previewOpen = true;
-    final result = await Navigator.of(context).push<ClusterPageResult>(
-      MaterialPageRoute(
-        builder: (context) => ClusterPage(
-          sortedFiles,
-          personID: relevantPerson,
-          clusterID: currentSuggestion.clusterIDToMerge,
-          showNamingBanner: false,
-        ),
+    final result = await _openPage<ClusterPageResult>(
+      ClusterPage(
+        sortedFiles,
+        personID: relevantPerson,
+        clusterID: currentSuggestion.clusterIDToMerge,
+        showNamingBanner: false,
       ),
     );
-
-    _previewOpen = false;
     if (!mounted) return;
     if (_suggestionsInvalidated) {
       await _reloadSuggestions();
@@ -428,22 +435,20 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       final clusterID = currentSuggestion.clusterIDToMerge;
       final someFile = currentSuggestion.filesInCluster.first;
 
-      final result = isBodyReference(clusterID)
-          ? await showMergeClustersToPersonPage(context)
-          : await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => SaveOrEditPerson(
-                  clusterID,
-                  file: someFile,
-                  isEditing: false,
-                ),
-              ),
-            );
+      final result = await _openPage<Object>(
+        isBodyReference(clusterID)
+            ? const MergeClustersToPersonPage()
+            : SaveOrEditPerson(clusterID, file: someFile, isEditing: false),
+      );
       if (result is MergePersonSelectionResult) {
         final selected =
             result.person ??
             await PersonService.instance.getPerson(result.personId);
-        if (selected == null) return;
+        if (selected == null) {
+          await _finishProcessing();
+          if (mounted && hasCurrentSuggestion) unawaited(_animateIn());
+          return;
+        }
         if (selected.remoteID != currentSuggestion.person.remoteID) {
           await ClusterFeedbackService.instance.rejectSuggestion(
             personID: currentSuggestion.person.remoteID,
@@ -461,12 +466,12 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       }
       if (!mounted || loadID != _suggestionLoadID) return;
       if (result == null || result == false) {
-        unawaited(_animateIn());
-        if (mounted) {
-          setState(() {
-            isProcessing = false;
-          });
-        }
+        await _finishProcessing();
+        if (mounted && hasCurrentSuggestion) unawaited(_animateIn());
+        return;
+      }
+      if (_suggestionsInvalidated) {
+        await _reloadSuggestions();
         return;
       }
       await Future.delayed(const Duration(milliseconds: 300));
@@ -481,11 +486,8 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
     } catch (e, s) {
       _logger.severe("Error handling user choice", e, s);
       if (mounted && loadID == _suggestionLoadID) {
-        setState(() {
-          isProcessing = false;
-          hasCurrentSuggestion = true;
-        });
-        await _animateIn();
+        await _finishProcessing();
+        if (mounted && hasCurrentSuggestion) await _animateIn();
         if (mounted) await showGenericErrorDialog(context: context, error: e);
       }
     }

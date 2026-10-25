@@ -3,16 +3,29 @@ import "package:photos/events/files_updated_event.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
 
-/// Requery membership rather than editing a suggestion's files in place. Its
-/// detection snapshot and prepared thumbnails must describe the same members.
+/// Requery suggestions and their prepared previews together after membership
+/// changes, rather than editing only the displayed file list.
 bool reviewSuggestionsAffectedBy(
   Event event,
   Iterable<ClusterSuggestion> suggestions, {
   bool previewOpen = false,
+  bool suggestionsLoading = false,
+  String? personID,
 }) {
-  // Splitting a group can emit an unscoped people change. Defer a fresh query
-  // until returning from the preview instead of retaining its old group ID.
-  if (previewOpen && event is PeopleChangedEvent) return true;
+  if (event is PeopleChangedEvent &&
+      event.type == PeopleEventType.reviewedSuggestion) {
+    return personID == null || event.person?.remoteID == personID;
+  }
+  // Splitting a group emits an unscoped change. Cards mounted beneath the
+  // preview must also refresh, even though their own preview is not open.
+  if (event is PeopleChangedEvent &&
+      (previewOpen ||
+          (event.type == PeopleEventType.defaultType &&
+              event.source.isEmpty &&
+              event.person == null &&
+              event.persons == null))) {
+    return true;
+  }
   if (event is FilesUpdatedEvent) {
     if (event.source == "moveFrom" ||
         (event.type != EventType.deletedFromEverywhere &&
@@ -24,6 +37,9 @@ bool reviewSuggestionsAffectedBy(
         .map((file) => file.uploadedFileID)
         .nonNulls
         .toSet();
+    // Before a query returns, its captured membership is not available to
+    // determine whether this event affects it. Invalidate that query as well.
+    if (suggestionsLoading) return true;
     return suggestions.any(
       (suggestion) => suggestion.filesInCluster.any(
         (file) => ids.contains(file.uploadedFileID),
@@ -33,9 +49,10 @@ bool reviewSuggestionsAffectedBy(
   if (event is PeopleChangedEvent &&
       (event.type == PeopleEventType.removedFilesFromCluster ||
           event.type == PeopleEventType.removedFaceFromCluster)) {
-    return suggestions.any(
-      (suggestion) => suggestion.clusterIDToMerge == event.source,
-    );
+    return suggestionsLoading ||
+        suggestions.any(
+          (suggestion) => suggestion.clusterIDToMerge == event.source,
+        );
   }
   return false;
 }

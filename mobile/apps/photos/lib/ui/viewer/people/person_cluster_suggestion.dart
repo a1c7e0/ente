@@ -42,12 +42,15 @@ class PersonReviewClusterSuggestion extends StatefulWidget {
   final Future<void> Function(ClusterSuggestion, bool)? saveFeedback;
   @visibleForTesting
   final ReviewThumbnailLoader Function(int count)? createThumbnailLoader;
+  @visibleForTesting
+  final Future<Object?> Function(Widget)? openPage;
 
   const PersonReviewClusterSuggestion(
     this.person, {
     this.loadSuggestions,
     this.saveFeedback,
     this.createThumbnailLoader,
+    this.openPage,
     super.key,
   });
 
@@ -74,6 +77,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
   late final StreamSubscription<FilesUpdatedEvent> _filesUpdatedEvent;
   bool _previewOpen = false;
   bool _savingFeedback = false;
+  bool _loadingSuggestions = false;
   bool _suggestionsInvalidated = false;
 
   @override
@@ -151,33 +155,7 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
                 Expanded(
                   child: SingleChildScrollView(
                     child: GestureDetector(
-                      onTap: () async {
-                        if (_savingFeedback) return;
-                        final List<EnteFile> sortedFiles = List<EnteFile>.from(
-                          currentSuggestion.filesInCluster,
-                        );
-                        sortedFiles.sort(
-                          (a, b) => b.creationTime!.compareTo(a.creationTime!),
-                        );
-                        _previewOpen = true;
-                        final result = await Navigator.of(context)
-                            .push<ClusterPageResult>(
-                              MaterialPageRoute(
-                                builder: (context) => ClusterPage(
-                                  sortedFiles,
-                                  personID: widget.person,
-                                  clusterID: clusterID,
-                                  showNamingBanner: false,
-                                ),
-                              ),
-                            );
-                        _previewOpen = false;
-                        if (mounted &&
-                            (_suggestionsInvalidated ||
-                                result == ClusterPageResult.ignoredPerson)) {
-                          _reloadSuggestions();
-                        }
-                      },
+                      onTap: () => _navigateToCluster(currentSuggestion),
                       behavior: HitTestBehavior.opaque,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -391,27 +369,29 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
 
   Future<void> _saveAsAnotherPerson() async {
     if (!canGiveFeedback ||
+        _savingFeedback ||
         allSuggestions.isEmpty ||
         currentSuggestionIndex >= allSuggestions.length) {
       return;
     }
-
+    var saved = false;
+    setState(() {
+      _savingFeedback = true;
+      canGiveFeedback = false;
+    });
     try {
       final currentSuggestion = allSuggestions[currentSuggestionIndex];
       final clusterID = currentSuggestion.clusterIDToMerge;
-      final someFile = currentSuggestion.filesInCluster.first;
-
-      final result = isBodyReference(clusterID)
-          ? await showMergeClustersToPersonPage(context)
-          : await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => SaveOrEditPerson(
-                  clusterID,
-                  file: someFile,
-                  isEditing: false,
-                ),
+      final result = await _openPage<Object>(
+        isBodyReference(clusterID)
+            ? const MergeClustersToPersonPage()
+            : SaveOrEditPerson(
+                clusterID,
+                file: currentSuggestion.filesInCluster.first,
+                isEditing: false,
               ),
-            );
+      );
+      if (result == null || result == false) return;
       if (result is MergePersonSelectionResult) {
         final selected =
             result.person ??
@@ -429,49 +409,73 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
           bodyDetectionsByFile: currentSuggestion.bodyDetectionsByFile,
         );
       }
-      if (result == null || result == false) {
-        return;
-      }
+      saved = true;
       _notifySuggestionReviewed();
-      if (!mounted) return;
-      currentSuggestionIndex++;
-      final numberOfSuggestions = allSuggestions.length;
-      if (currentSuggestionIndex >= numberOfSuggestions) {
-        setState(() {
-          currentSuggestionIndex = 0;
-          futureBuilderKeySuggestions = UniqueKey();
-          _fetchClusterSuggestions();
-        });
-      } else {
-        _prepareNextSuggestion();
+    } catch (error, stack) {
+      _logger.severe("Error saving as another person", error, stack);
+      if (mounted) await showGenericErrorDialog(context: context, error: error);
+    } finally {
+      _savingFeedback = false;
+      if (mounted) {
+        if (_suggestionsInvalidated ||
+            (saved && currentSuggestionIndex + 1 >= allSuggestions.length)) {
+          _reloadSuggestions();
+        } else if (saved) {
+          currentSuggestionIndex++;
+          _prepareNextSuggestion();
+        } else {
+          setState(() => canGiveFeedback = true);
+        }
       }
-    } catch (e, s) {
-      _logger.severe("Error saving as another person", e, s);
+    }
+  }
+
+  Future<T?> _openPage<T>(Widget page) async {
+    _previewOpen = true;
+    try {
+      if (widget.openPage != null) return await widget.openPage!(page) as T?;
+      return await Navigator.of(
+        context,
+      ).push<T>(MaterialPageRoute(builder: (_) => page));
+    } finally {
+      _previewOpen = false;
+    }
+  }
+
+  Future<void> _navigateToCluster(ClusterSuggestion suggestion) async {
+    if (_savingFeedback) return;
+    final sortedFiles = List<EnteFile>.from(suggestion.filesInCluster)
+      ..sort((a, b) => b.creationTime!.compareTo(a.creationTime!));
+    final result = await _openPage<ClusterPageResult>(
+      ClusterPage(
+        sortedFiles,
+        personID: widget.person,
+        clusterID: suggestion.clusterIDToMerge,
+        showNamingBanner: false,
+      ),
+    );
+    if (mounted &&
+        (_suggestionsInvalidated ||
+            result == ClusterPageResult.ignoredPerson)) {
+      _reloadSuggestions();
     }
   }
 
   void _onSuggestionChanged(Event event) {
     if (identical(event, _lastReviewedEvent)) return;
-    if (event is PeopleChangedEvent &&
-        event.type == PeopleEventType.reviewedSuggestion &&
-        event.person?.remoteID == widget.person.remoteID) {
-      _suggestionsInvalidated = true;
-      if (!_previewOpen && !_savingFeedback) _reloadSuggestions();
-      return;
-    }
     if (!reviewSuggestionsAffectedBy(
       event,
       _savingFeedback
           ? allSuggestions
           : allSuggestions.skip(currentSuggestionIndex),
       previewOpen: _previewOpen,
+      suggestionsLoading: _loadingSuggestions,
+      personID: widget.person.remoteID,
     )) {
       return;
     }
     _suggestionsInvalidated = true;
-    if (!_previewOpen && !_savingFeedback) {
-      _reloadSuggestions();
-    }
+    if (!_previewOpen && !_savingFeedback) _reloadSuggestions();
   }
 
   void _reloadSuggestions() {
@@ -493,18 +497,25 @@ class _PersonClustersState extends State<PersonReviewClusterSuggestion> {
 
   void _fetchClusterSuggestions() {
     canGiveFeedback = false;
+    _loadingSuggestions = true;
+    allSuggestions = [];
     final loadID = ++_suggestionLoadID;
     futureClusterSuggestions =
         (widget.loadSuggestions?.call() ??
                 ClusterFeedbackService.instance.getSuggestionForPerson(
                   widget.person,
                 ))
-            .then((suggestions) {
+            .then<List<ClusterSuggestion>>((suggestions) {
               if (!mounted || loadID != _suggestionLoadID) {
                 return <ClusterSuggestion>[];
               }
               allSuggestions = suggestions;
               return _prepareSuggestions(suggestions, 0, loadID);
+            })
+            .whenComplete(() {
+              if (mounted && loadID == _suggestionLoadID) {
+                _loadingSuggestions = false;
+              }
             });
   }
 

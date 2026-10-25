@@ -1,7 +1,10 @@
 # Review feedback and preview refresh
 
-Review and cache changes live on `fix/review-feedback-refresh`. Body feedback
-persistence has also been promoted separately to `main`; see
+Review and cache changes live on `fix/review-feedback-refresh` and are combined
+with the other Photos features on `feat/integration-test`. The review invalidation
+fixes from [upstream PR #14053](https://github.com/ente/ente/pull/14053) are applied
+without replacing the fork's body previews or asynchronous thumbnail queue. Body
+feedback persistence has also been promoted separately to `main`; see
 [body feedback synchronization](body-feedback-sync.md).
 
 ## Saving feedback
@@ -50,7 +53,9 @@ Following the scenario in [upstream #9341](https://github.com/ente/ente/issues/9
 review surfaces listen for relevant file deletions/hiding and mixed-grouping edits.
 They query fresh suggestions and discard their prepared preview window together.
 Changes while the cluster preview is open are coalesced until return; changes
-during feedback saving are handled after completion. Upload IDs match deleted
+during feedback saving are handled after completion. Canceling a naming form also
+applies deferred changes. Changes received before a query returns invalidate that
+query, including when an older list was previously displayed. Upload IDs match deleted
 photos across different local album rows. Moving out of an album is not treated
 as deleting the photo from the library.
 
@@ -86,6 +91,7 @@ Run `flutter analyze --no-pub` in `mobile/apps/photos`, plus focused Flutter tes
 - `test/models/ml/face/person_cache_test.dart`
 - `test/ui/viewer/people/review_feedback_flow_test.dart`
 - `test/ui/viewer/people/review_suggestion_changes_test.dart`
+- `test/ui/viewer/people/review_suggestion_refresh_test.dart`
 - `test/utils/face/face_crop_request_queue_test.dart`
 - Existing review queue, geometry, avatar, and body crop cache regressions.
 
