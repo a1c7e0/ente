@@ -224,10 +224,6 @@ photo edges are clipped; the area outside the rounded body box is dimmed by 55%.
 The bright window uses the existing thumbnail superellipse corner style. Face
 previews retain their cover fit; other body thumbnail surfaces are unchanged.
 
-A host-side synthetic review benchmark used 7,877 one-detection indexes with
-the measured vectors (29.3 MB of JSON). Building the previous full review cache
-key with `JSON.stringify` took 248 ms median and 262 ms p95 on this host. This
-is not an Android timing; it shows the repeated work the revision cache removes.
 
 ## Review
 
