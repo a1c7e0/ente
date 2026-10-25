@@ -9,8 +9,19 @@ import "package:photos/services/filedata/model/file_data.dart";
 import "package:photos/services/filedata/model/response.dart";
 import "package:shared_preferences/shared_preferences.dart";
 
+const _clip = {
+  "version": 1,
+  "client": "test",
+  "embedding": [0.1],
+};
+
 class _MemoryMetadata extends FileDataService {
-  Map<String, dynamic> data = {"face": "old", "body": "old", "future": 7};
+  Map<String, dynamic> data = {
+    "face": "old",
+    "body": "old",
+    "clip": _clip,
+    "future": 7,
+  };
   int stamp = 10;
   final writes = <int>[];
   int reads = 0;
@@ -77,6 +88,7 @@ void main() {
       expect(service.data, {
         "face": "new",
         "body": "another-device",
+        "clip": _clip,
         "future": 7,
       });
     },
@@ -96,7 +108,12 @@ void main() {
       }, initialData: snapshot);
       expect(service.reads, 1);
       expect(service.writes, [10]);
-      expect(service.data, {"face": "old", "body": "reviewed", "future": 7});
+      expect(service.data, {
+        "face": "old",
+        "body": "reviewed",
+        "clip": _clip,
+        "future": 7,
+      });
     },
   );
 
@@ -118,6 +135,7 @@ void main() {
       expect(service.data, {
         "face": "another-device",
         "body": "reviewed",
+        "clip": _clip,
         "future": 7,
       });
     },

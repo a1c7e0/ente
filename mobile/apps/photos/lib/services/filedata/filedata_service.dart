@@ -148,8 +148,12 @@ class FileDataService {
       }
       if (!await update(entity)) return entity;
       try {
-        if (!allowPartialMetadata) entity.validate();
-        await _putFileData(file, entity, isCurrentSession: isCurrentSession);
+        if (!allowPartialMetadata && isCurrentSession == null) {
+          await putFileData(file, entity);
+        } else {
+          if (!allowPartialMetadata) entity.validate();
+          await _putFileData(file, entity, isCurrentSession: isCurrentSession);
+        }
         return entity;
       } on DioException catch (e) {
         if (e.response?.statusCode != 409 || attempt == 2) rethrow;
