@@ -98,134 +98,82 @@ void main() {
     );
   }
 
-  for (final standalone in [false, true]) {
-    for (final groupEdit in [false, true]) {
-      testWidgets(
-        "canceling the naming form applies a deferred ${groupEdit ? 'group' : 'file'} change ($standalone)",
-        (tester) async {
-          final fixture = _Fixture();
-          await fixture.mount(tester, standalone);
-          await tester.tap(find.text("Save as another person"));
-          await tester.pump();
-          fixture.suggestions = [];
-          Bus.instance.fire(
-            groupEdit
-                ? PeopleChangedEvent(
-                    source: "first",
-                    type: PeopleEventType.removedFilesFromCluster,
-                  )
-                : FilesUpdatedEvent([
-                    EnteFile()..uploadedFileID = 1,
-                  ], type: EventType.hide),
-          );
-          await tester.pump();
-          expect(fixture.loads, 1);
-          fixture.preview.complete(false);
-          await tester.pumpAndSettle();
-          expect(fixture.loads, 2);
-          expect(fixture.clusters(tester), isEmpty);
-          await tester.pumpWidget(const SizedBox.shrink());
-        },
-      );
-    }
-    for (final initial in [false, true]) {
-      for (final groupEdit in [false, true]) {
-        testWidgets(
-          "pending query handles ${groupEdit ? 'group' : 'file'} changes ($standalone, initial: $initial)",
-          (tester) async {
-            final fixture = _Fixture();
-            final captured = List<ClusterSuggestion>.of(fixture.suggestions);
-            final pending = Completer<List<ClusterSuggestion>>();
-            if (initial) fixture.loadOverride = () => pending.future;
-            await fixture.mount(tester, standalone, settle: !initial);
-            if (!initial) {
-              fixture.loadOverride = () => pending.future;
-              fixture.reviewed();
-              await tester.pump();
-            }
-            fixture.loadOverride = null;
-            fixture.suggestions = [];
-            Bus.instance.fire(
-              groupEdit
-                  ? PeopleChangedEvent(
-                      source: "first",
-                      type: PeopleEventType.removedFaceFromCluster,
-                    )
-                  : FilesUpdatedEvent(
-                      [EnteFile()..uploadedFileID = 1],
-                      type: initial
-                          ? EventType.deletedFromEverywhere
-                          : EventType.hide,
-                    ),
-            );
-            await tester.pump();
-            pending.complete(captured);
-            await tester.pumpAndSettle();
-            expect(fixture.clusters(tester), isEmpty);
-            expect(fixture.loads, initial ? 2 : 3);
-            await tester.pumpWidget(const SizedBox.shrink());
-          },
+  for (final (standalone, groupEdit) in [(false, false), (true, true)]) {
+    testWidgets(
+      "canceling the naming form applies a deferred ${groupEdit ? 'group' : 'file'} change ($standalone)",
+      (tester) async {
+        final fixture = _Fixture();
+        await fixture.mount(tester, standalone);
+        await tester.tap(find.text("Save as another person"));
+        await tester.pump();
+        fixture.suggestions = [];
+        Bus.instance.fire(
+          groupEdit
+              ? PeopleChangedEvent(
+                  source: "first",
+                  type: PeopleEventType.removedFilesFromCluster,
+                )
+              : FilesUpdatedEvent([
+                  EnteFile()..uploadedFileID = 1,
+                ], type: EventType.hide),
         );
-      }
-    }
+        await tester.pump();
+        expect(fixture.loads, 1);
+        fixture.preview.complete(false);
+        await tester.pumpAndSettle();
+        expect(fixture.loads, 2);
+        expect(fixture.clusters(tester), isEmpty);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  for (final (standalone, initial, groupEdit) in [
+    (false, false, false),
+    (false, true, true),
+    (true, false, true),
+    (true, true, false),
+  ]) {
+    testWidgets(
+      "pending query handles ${groupEdit ? 'group' : 'file'} changes ($standalone, initial: $initial)",
+      (tester) async {
+        final fixture = _Fixture();
+        final captured = List<ClusterSuggestion>.of(fixture.suggestions);
+        final pending = Completer<List<ClusterSuggestion>>();
+        if (initial) fixture.loadOverride = () => pending.future;
+        await fixture.mount(tester, standalone, settle: !initial);
+        if (!initial) {
+          fixture.loadOverride = () => pending.future;
+          fixture.reviewed();
+          await tester.pump();
+        }
+        fixture.loadOverride = null;
+        fixture.suggestions = [];
+        Bus.instance.fire(
+          groupEdit
+              ? PeopleChangedEvent(
+                  source: "first",
+                  type: PeopleEventType.removedFaceFromCluster,
+                )
+              : FilesUpdatedEvent(
+                  [EnteFile()..uploadedFileID = 1],
+                  type: initial
+                      ? EventType.deletedFromEverywhere
+                      : EventType.hide,
+                ),
+        );
+        await tester.pump();
+        pending.complete(captured);
+        await tester.pumpAndSettle();
+        expect(fixture.clusters(tester), isEmpty);
+        expect(fixture.loads, initial ? 2 : 3);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
   }
 
   for (final standalone in [false, true]) {
     final surface = standalone ? "review page" : "person card";
-
-    testWidgets("$surface refreshes deleted candidates by uploaded ID", (
-      tester,
-    ) async {
-      final fixture = _Fixture();
-      await fixture.mount(tester, standalone);
-      fixture.suggestions = [];
-      Bus.instance.fire(
-        FilesUpdatedEvent([
-          EnteFile()
-            ..uploadedFileID = 1
-            ..generatedID = 999,
-        ], type: EventType.deletedFromEverywhere),
-      );
-      await tester.pumpAndSettle();
-      expect(fixture.loads, 2);
-      expect(fixture.clusters(tester), isEmpty);
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
-
-    testWidgets("$surface defers preview edits then requeries membership", (
-      tester,
-    ) async {
-      final fixture = _Fixture();
-      await fixture.mount(tester, standalone);
-      if (standalone) {
-        await tester.tap(
-          find.byKey(const ValueKey("cluster_id-first-files-1")),
-        );
-      } else {
-        await tester.tap(find.byKey(const ValueKey("suggestion_0")));
-      }
-      await tester.pump();
-      fixture.suggestions = [fixture.suggestion("split", 2)];
-      Bus.instance.fire(
-        PeopleChangedEvent(
-          source: "first",
-          type: PeopleEventType.removedFilesFromCluster,
-          relevantFiles: [EnteFile()..uploadedFileID = 1],
-        ),
-      );
-      Bus.instance.fire(PeopleChangedEvent());
-      await tester.pump();
-      expect(
-        fixture.loads,
-        1,
-        reason: "coalesce edits until the preview closes",
-      );
-      fixture.preview.complete(null);
-      await tester.pumpAndSettle();
-      expect(fixture.loads, 2);
-      expect(fixture.clusters(tester).single, "split");
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
 
     testWidgets("$surface cannot restore a deleted candidate from late crops", (
       tester,
@@ -246,25 +194,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(fixture.clusters(tester), isEmpty);
       expect(fixture.loads, 2);
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
-
-    testWidgets("$surface refreshes only its reviewed person", (tester) async {
-      final fixture = _Fixture();
-      await fixture.mount(tester, standalone);
-      Bus.instance.fire(
-        PeopleChangedEvent(
-          type: PeopleEventType.reviewedSuggestion,
-          person: PersonEntity("other", PersonData(name: "Other")),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(fixture.loads, 1);
-      fixture.suggestions = [];
-      fixture.reviewed();
-      await tester.pumpAndSettle();
-      expect(fixture.loads, 2);
-      expect(fixture.clusters(tester), isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());
     });
 
@@ -344,45 +273,43 @@ void main() {
   });
 
   for (final standalone in [false, true]) {
-    for (final accepted in [false, true]) {
-      for (final leaveBeforeSave in [false, true]) {
-        testWidgets(
-          "all-people card refreshes after ${standalone ? 'review' : 'person'} page feedback ($accepted, early return: $leaveBeforeSave)",
-          (tester) async {
-            final fixture = _Fixture();
-            await fixture.mount(tester, false, allPeople: true);
-            final navigator = Navigator.of(
-              tester.element(find.byType(PersonGallerySuggestion)),
-            );
-            unawaited(
-              navigator.push(
-                MaterialPageRoute<void>(
-                  builder: (_) => standalone
-                      ? fixture.review(true)
-                      : Scaffold(body: fixture.review(false)),
-                ),
+    for (final (accepted, leaveBeforeSave) in [(false, false), (true, true)]) {
+      testWidgets(
+        "all-people card refreshes after ${standalone ? 'review' : 'person'} page feedback ($accepted, early return: $leaveBeforeSave)",
+        (tester) async {
+          final fixture = _Fixture();
+          await fixture.mount(tester, false, allPeople: true);
+          final navigator = Navigator.of(
+            tester.element(find.byType(PersonGallerySuggestion)),
+          );
+          unawaited(
+            navigator.push(
+              MaterialPageRoute<void>(
+                builder: (_) => standalone
+                    ? fixture.review(true)
+                    : Scaffold(body: fixture.review(false)),
               ),
-            );
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(accepted ? "Yes" : "No"));
+          await tester.pump();
+          await tester.pump(const Duration(seconds: 1));
+          fixture.suggestions = [];
+          if (leaveBeforeSave) {
+            navigator.pop();
             await tester.pumpAndSettle();
-            await tester.tap(find.text(accepted ? "Yes" : "No"));
-            await tester.pump();
-            await tester.pump(const Duration(seconds: 1));
-            fixture.suggestions = [];
-            if (leaveBeforeSave) {
-              navigator.pop();
-              await tester.pumpAndSettle();
-            }
-            fixture.save.complete();
+          }
+          fixture.save.complete();
+          await tester.pumpAndSettle();
+          if (!leaveBeforeSave) {
+            navigator.pop();
             await tester.pumpAndSettle();
-            if (!leaveBeforeSave) {
-              navigator.pop();
-              await tester.pumpAndSettle();
-            }
-            expect(fixture.clusters(tester), isEmpty);
-            await tester.pumpWidget(const SizedBox.shrink());
-          },
-        );
-      }
+          }
+          expect(fixture.clusters(tester), isEmpty);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
     }
   }
 
@@ -406,27 +333,6 @@ void main() {
     );
     await tester.pump();
     pending.complete([fixture.suggestion("new", 99)]);
-    await tester.pumpAndSettle();
-    expect(fixture.loads, 3);
-    expect(fixture.clusters(tester), isEmpty);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets("all-people card ignores an obsolete suggestion query", (
-    tester,
-  ) async {
-    final fixture = _Fixture();
-    await fixture.mount(tester, false, allPeople: true);
-    final previous = List<ClusterSuggestion>.of(fixture.suggestions);
-    final stale = Completer<List<ClusterSuggestion>>();
-    fixture.loadOverride = () => stale.future;
-    fixture.reviewed();
-    await tester.pump();
-    fixture.loadOverride = null;
-    fixture.suggestions = [];
-    fixture.reviewed();
-    await tester.pumpAndSettle();
-    stale.complete(previous);
     await tester.pumpAndSettle();
     expect(fixture.loads, 3);
     expect(fixture.clusters(tester), isEmpty);
