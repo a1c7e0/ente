@@ -79,6 +79,34 @@ void main() {
   });
 
   test(
+    "unscoped changes refresh background cards; preview edits are coalesced",
+    () {
+      expect(affected(PeopleChangedEvent(), candidates), isTrue);
+      expect(affected(PeopleChangedEvent(), const []), isTrue);
+      expect(affected(PeopleChangedEvent(person: person), candidates), isFalse);
+      expect(
+        affected(PeopleChangedEvent(source: "other"), candidates),
+        isFalse,
+      );
+      expect(
+        affected(
+          PeopleChangedEvent(type: PeopleEventType.syncDone),
+          candidates,
+        ),
+        isFalse,
+      );
+      expect(
+        affected(
+          PeopleChangedEvent(person: person),
+          candidates,
+          previewOpen: true,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     "pending queries invalidate even with a retained, unrelated snapshot",
     () {
       for (final snapshot in [<ClusterSuggestion>[], candidates]) {
