@@ -60,7 +60,7 @@ APK workflow 移除了遗留的单项应用矩阵和 Locker 参数分支。Photo
 
 | 链接 | 本次核对的状态 | 与本 fork 的关系 |
 | --- | --- | --- |
-| [PR #14053](https://github.com/ente/ente/pull/14053) | Open；未合并；REVIEW_REQUIRED | 我们提交的人脸 review 刷新修复，不带 body 或 Lab 功能。回归测试由 42 项精简至 20 项并在本地通过，功能代码不变。自动审查结果以 PR 最新提交为准，仍需维护者审查。 |
+| [PR #14053](https://github.com/ente/ente/pull/14053) | Open；未合并；REVIEW_REQUIRED | 我们提交的人脸 review 刷新修复，不带 body 或 Lab 功能。回归测试由 42 项精简至 25 项并在本地通过，功能代码不变。自动审查结果以 PR 最新提交为准，仍需维护者审查。 |
 | [Issue #9341](https://github.com/ente/ente/issues/9341) | Open | 删除唯一照片后仍出现候选；#14053 声明修复此问题。 |
 | [Issue #9083](https://github.com/ente/ente/issues/9083) | Closed | 忽略匹配、返回页面后旧提示仍显示；属于相关历史背景，不应推断当前复现已被全部覆盖。 |
 | [PR #11948](https://github.com/ente/ente/pull/11948) | Merged | 已有跨页面 review 刷新实现；本 fork 复用相应事件机制。 |
