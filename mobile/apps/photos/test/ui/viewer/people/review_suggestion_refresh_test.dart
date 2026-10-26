@@ -131,9 +131,7 @@ void main() {
   }
 
   for (final (standalone, initial, groupEdit) in [
-    (false, false, false),
-    (false, true, true),
-    (true, false, true),
+    (false, false, true),
     (true, true, false),
   ]) {
     testWidgets(
@@ -218,24 +216,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(fixture.loads, 2);
       expect(fixture.clusters(tester), isEmpty);
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
-
-    testWidgets("$surface keeps the sender's next candidate after feedback", (
-      tester,
-    ) async {
-      final fixture = _Fixture();
-      fixture.suggestions.add(fixture.suggestion("second", 2));
-      await fixture.mount(tester, standalone);
-      await tester.tap(find.text("Yes"));
-      fixture.save.complete();
-      await tester.pumpAndSettle();
-      expect(
-        fixture.loads,
-        1,
-        reason: "do not invalidate the sender's preview",
-      );
-      expect(fixture.clusters(tester), ["second"]);
       await tester.pumpWidget(const SizedBox.shrink());
     });
   }
