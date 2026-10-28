@@ -519,15 +519,18 @@ class TripMemoriesCalculatorV2 {
   }
 
   static bool _isValidTrip(
-    List<EnteFile> files,
+    List<EnteFile> sortedFiles,
     Location location,
     List<BaseLocation> bases,
   ) {
-    if (files.length < _minTripPhotos) return false;
+    if (sortedFiles.length < _minTripPhotos) return false;
 
-    final times = files.map((f) => f.creationTime!).toList()..sort();
-    final first = DateTime.fromMicrosecondsSinceEpoch(times.first);
-    final last = DateTime.fromMicrosecondsSinceEpoch(times.last);
+    final first = DateTime.fromMicrosecondsSinceEpoch(
+      sortedFiles.first.creationTime!,
+    );
+    final last = DateTime.fromMicrosecondsSinceEpoch(
+      sortedFiles.last.creationTime!,
+    );
     final days = last.difference(first).inDays;
     if (days < _minTripDays) return false;
 

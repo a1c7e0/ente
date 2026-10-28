@@ -304,13 +304,16 @@ class PhotoSelector {
     final selectedCreationTimes = <int>[];
     int round = 0;
     int skipped = 0;
+    final nextIndexByYear = <int, int>{};
 
     outerLoop:
     while (selected.length + skipped < fileCount) {
       for (final year in years) {
         final yearFiles = yearToFiles[year]!;
-        if (yearFiles.isEmpty) continue;
-        final candidate = yearFiles.removeAt(0);
+        final nextIndex = nextIndexByYear[year] ?? 0;
+        if (nextIndex >= yearFiles.length) continue;
+        final candidate = yearFiles[nextIndex];
+        nextIndexByYear[year] = nextIndex + 1;
         final creationTime = candidate.file.creationTime;
 
         if (isTooCloseInTime(creationTime, selectedCreationTimes)) {
@@ -672,13 +675,16 @@ class PhotoSelector {
     final selectedCreationTimes = <int>[];
     final fileCount = withCreationTime.length;
     int skipped = 0;
+    final nextIndexByYear = <int, int>{};
 
     outerLoop:
     while (selected.length + skipped < fileCount) {
       for (final year in years) {
         final yearFiles = yearToFiles[year]!;
-        if (yearFiles.isEmpty) continue;
-        final candidate = yearFiles.removeAt(0);
+        final nextIndex = nextIndexByYear[year] ?? 0;
+        if (nextIndex >= yearFiles.length) continue;
+        final candidate = yearFiles[nextIndex];
+        nextIndexByYear[year] = nextIndex + 1;
         final creationTime = candidate.file.creationTime;
         if (isTooCloseInTime(creationTime, selectedCreationTimes)) {
           skipped++;

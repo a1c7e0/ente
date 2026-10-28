@@ -378,6 +378,7 @@ func main() {
 		EmailNotificationCtrl: emailNotificationCtrl,
 		CollectionLinkRepo:    collectionLinkRepo,
 		FileLinkRepo:          fileLinkRepo,
+		MemoryShareRepo:       memoryShareRepo,
 		CollectionRepo:        collectionRepo,
 		UserRepo:              userRepo,
 		JwtSecret:             jwtSecretBytes,
@@ -677,7 +678,6 @@ func main() {
 
 	storageAPI.GET("/social/diff", socialHandler.UnifiedDiff)
 	storageAPI.GET("/social/anon-profiles", socialHandler.AnonProfiles)
-	storageAPI.GET("/comments-reactions/counts", socialHandler.Counts)
 	storageAPI.GET("/comments-reactions/updated-at", socialHandler.LatestUpdates)
 
 	emergencyCtrl := &emergency.Controller{
@@ -1225,8 +1225,8 @@ func setupDatabase() *sql.DB {
 		panic(err)
 	}
 
-	db.SetMaxIdleConns(30)
-	db.SetMaxOpenConns(60)
+	db.SetMaxIdleConns(50)
+	db.SetMaxOpenConns(80)
 	db.SetConnMaxLifetime(30 * time.Minute)
 	db.SetConnMaxIdleTime(10 * time.Minute)
 

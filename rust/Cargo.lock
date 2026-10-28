@@ -1705,9 +1705,9 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "crypto-bigint"
-version = "0.7.5"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
+checksum = "9c035cb64cba03dad2fb921f3e218785e8cf9a41790da5eb3a1400f62fa2be11"
 dependencies = [
  "cpubits",
  "ctutils",
@@ -1797,9 +1797,9 @@ checksum = "e2e30e509674ef0ec91e21a7735766db37d163d46151b6a361d8b83dd79116bd"
 
 [[package]]
 name = "ctutils"
-version = "0.4.4"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865"
+checksum = "fe3e9d21d39e6f39ff46e03d5b621424f88ee23d8a1672c6bfc9ccc7f2da4f6a"
 dependencies = [
  "cmov",
 ]
@@ -2483,6 +2483,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ente-auth-frb"
+version = "0.0.0"
+dependencies = [
+ "ente-frb-lib",
+ "flutter_rust_bridge",
+]
+
+[[package]]
 name = "ente-auth-wasm"
 version = "0.0.0"
 dependencies = [
@@ -2525,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "ente-cli"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2695,6 +2703,7 @@ dependencies = [
 name = "ente-frb-lib"
 version = "0.0.0"
 dependencies = [
+ "ente-accounts",
  "ente-contacts",
  "ente-core",
  "ente-legacy",
@@ -2839,6 +2848,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ente-notification-uniffi"
+version = "0.0.0"
+dependencies = [
+ "ente-core",
+ "thiserror 2.0.21",
+ "uniffi",
+]
+
+[[package]]
 name = "ente-paste"
 version = "0.0.0"
 dependencies = [
@@ -2864,6 +2882,23 @@ dependencies = [
  "tsify",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "ente-photobook"
+version = "0.0.0"
+dependencies = [
+ "jpeg-encoder",
+ "moxcms 0.9.1",
+]
+
+[[package]]
+name = "ente-photobook-wasm"
+version = "0.0.0"
+dependencies = [
+ "ente-photobook",
+ "ente-wasm-lib",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2924,7 +2959,6 @@ dependencies = [
  "ente-vecdb",
  "flutter_rust_bridge",
  "log",
- "numkong",
 ]
 
 [[package]]
@@ -3032,6 +3066,7 @@ dependencies = [
  "ente-contacts",
  "ente-core",
  "ente-legacy",
+ "ente-location",
  "ente-locker",
  "js-sys",
  "log",
@@ -5411,6 +5446,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpeg-encoder"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0370574b86f7eca156b9f298392b5e69a23f8c86f3f865add60bbc2e79467a6"
+
+[[package]]
 name = "js-sys"
 version = "0.3.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6579,9 +6620,9 @@ dependencies = [
 
 [[package]]
 name = "numkong"
-version = "7.8.5"
+version = "7.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53bcc7469814b82ddffa194dbf3418fc28fa49015392261926f85c5f1cae0625"
+checksum = "2b58336b841e22774e40a67f4d9645843f67aad64df1e3459ae55dabbfa8dc8a"
 dependencies = [
  "cc",
 ]
@@ -12105,9 +12146,9 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zstd"
-version = "0.14.2"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "057cfd910cfac363a0ada849592624b4c9ff2e10bef504c3433810d78ed96f93"
+checksum = "db3ae9bf90af6e40197bef767eeefc46ad6397420fe873830bd85e5fbbfb3c70"
 dependencies = [
  "zstd-safe",
 ]

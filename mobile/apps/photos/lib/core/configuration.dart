@@ -57,6 +57,8 @@ import 'package:photos/services/photos_contacts_service.dart';
 import 'package:photos/services/search_service.dart';
 import 'package:photos/services/sync/sync_service.dart';
 import 'package:photos/services/video_preview_service.dart';
+import 'package:photos/src/rust/third_party/ente_frb_lib/account_deletion.dart'
+    as account_deletion;
 import 'package:photos/utils/validator_util.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import "package:tuple/tuple.dart";
@@ -218,7 +220,12 @@ class Configuration implements LockScreenHost, AccountDeletionHost {
     }
 
     if (Platform.isIOS) {
-      await NotificationKeyService.setNotificationPrivateKey(null);
+      try {
+        await NotificationKeyService.setNotificationPrivateKey(null);
+      } on PlatformException catch (e, s) {
+        if (e.code != 'notification_key_store') rethrow;
+        _logger.warning("Could not delete notification key", e, s);
+      }
     }
     await _clearTempFolderOnLogout();
 
@@ -578,14 +585,24 @@ class Configuration implements LockScreenHost, AccountDeletionHost {
   }
 
   @override
-  String decryptDeleteChallenge(String encryptedChallenge) {
-    final challenge = CryptoUtil.openSealSync(
-      CryptoUtil.base642bin(encryptedChallenge),
-      CryptoUtil.base642bin(getKeyAttributes()!.publicKey),
-      getSecretKey()!,
-    );
-    return utf8.decode(challenge);
-  }
+  Future<AccountDeletionSummary?> getDeletionSummary() =>
+      account_deletion.getDeletionSummary(session: authenticatedSession());
+
+  @override
+  Future<String> getDeleteChallenge() =>
+      account_deletion.getDeleteChallenge(session: authenticatedSession());
+
+  @override
+  Future<void> deleteAccount({
+    required String encryptedChallenge,
+    required String reason,
+    String? feedback,
+  }) => account_deletion.deleteAccount(
+    session: authenticatedSession(),
+    encryptedChallenge: encryptedChallenge,
+    reason: reason,
+    feedback: feedback,
+  );
 
   Future<void> setKey(String? key) async {
     _key = key;

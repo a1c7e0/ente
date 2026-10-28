@@ -36,16 +36,17 @@ import "package:photos/ui/viewer/people/merge_clusters_to_person_sheet.dart";
 import "package:photos/ui/viewer/people/people_page.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
 import "package:photos/ui/viewer/people/save_person_banner.dart";
-import "package:photos/ui/viewer/search/result/search_result_page.dart";
 
 class ClusterPage extends StatefulWidget {
   final List<EnteFile> searchResult;
   final bool enableGrouping;
   final String tagPrefix;
+  final String? coverHeroTag;
   final String clusterID;
   final PersonEntity? personID;
   final String appendTitle;
   final bool showNamingBanner;
+  final VoidCallback? onFilesChanged;
 
   static const GalleryType appBarType = GalleryType.cluster;
   static const GalleryType overlayType = GalleryType.cluster;
@@ -54,10 +55,12 @@ class ClusterPage extends StatefulWidget {
     this.searchResult, {
     this.enableGrouping = true,
     this.tagPrefix = "",
+    this.coverHeroTag,
     required this.clusterID,
     this.personID,
     this.appendTitle = "",
     this.showNamingBanner = true,
+    this.onFilesChanged,
     super.key,
   });
 
@@ -69,6 +72,7 @@ enum ClusterPageResult { ignoredPerson }
 
 class _ClusterPageState extends State<ClusterPage> {
   final _selectedFiles = SelectedFiles();
+  final _coverAppBarKey = GlobalKey();
   late final List<EnteFile> files;
   late final StreamSubscription<LocalPhotosUpdatedEvent> _filesUpdatedEvent;
   late final StreamSubscription<PeopleChangedEvent> _peopleChangedEvent;
@@ -93,6 +97,7 @@ class _ClusterPageState extends State<ClusterPage> {
         for (var updatedFile in event.updatedFiles) {
           files.remove(updatedFile);
         }
+        widget.onFilesChanged?.call();
         setState(() {});
       }
     });
@@ -102,6 +107,7 @@ class _ClusterPageState extends State<ClusterPage> {
           for (var updatedFile in event.relevantFiles!) {
             files.remove(updatedFile);
           }
+          widget.onFilesChanged?.call();
           setState(() {});
         }
         if (event.type == PeopleEventType.removedFaceFromCluster) {
@@ -109,6 +115,7 @@ class _ClusterPageState extends State<ClusterPage> {
             final int fileID = getFileIdFromFaceId<int>(removedFaceID);
             files.removeWhere((file) => file.uploadedFileID == fileID);
           }
+          widget.onFilesChanged?.call();
           setState(() {});
         }
       }
@@ -212,10 +219,13 @@ class _ClusterPageState extends State<ClusterPage> {
   @override
   Widget build(BuildContext context) {
     final appBar = ClusterAppBar.sliverConfig(
-      SearchResultPage.appBarType,
+      ClusterPage.appBarType,
       "${files.length} memories${widget.appendTitle}",
       _selectedFiles,
       widget.clusterID,
+      coverAppBarKey: _coverAppBarKey,
+      coverHeroTag: widget.coverHeroTag,
+      files: files,
       memoryLaneReady: widget.personID == null
           ? MemoryLaneService.instance.hasReadyTimelineSync(
               widget.clusterID,

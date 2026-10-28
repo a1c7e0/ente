@@ -1,16 +1,42 @@
 import type {
     EncryptedBox,
+    LocationIndex,
     OpenSessionInput,
     Session,
     WrappedRootContactKey,
 } from "./pkg/ente_photos_wasm";
 
-export type { OpenSessionInput, Session } from "./pkg/ente_photos_wasm";
+export type {
+    AccountDeletionSummary,
+    LocationCityGroup,
+    OpenSessionInput,
+    Session,
+} from "./pkg/ente_photos_wasm";
 
 const wasm = () => import("./pkg/ente_photos_wasm");
 
+export const createLocationIndex = async (
+    cities: Uint8Array,
+    urbanCenters: Uint8Array,
+): Promise<LocationIndex> =>
+    new (await wasm()).LocationIndex(cities, urbanCenters);
+
 export const openSession = async (input: OpenSessionInput): Promise<Session> =>
     (await wasm()).openSession(input);
+
+export const getAccountDeletionSummary = async (session: Session) =>
+    (await wasm()).getAccountDeletionSummary(session);
+
+export const getAccountDeleteChallenge = async (session: Session) =>
+    (await wasm()).getAccountDeleteChallenge(session);
+
+export const deleteAccount = async (
+    session: Session,
+    encryptedChallenge: string,
+    reason: string,
+    feedback?: string,
+) =>
+    (await wasm()).deleteAccount(session, encryptedChallenge, reason, feedback);
 
 export const recoveryKeyMnemonic = async (session: Session) =>
     (await wasm()).authRecoveryKeyMnemonic(session);

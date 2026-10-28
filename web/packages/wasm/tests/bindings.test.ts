@@ -10,9 +10,81 @@ import {
     generateKeyPair,
 } from "ente-prelogin-wasm";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { lockerPrepareFileLinkPayload } from "../locker/pkg/ente_locker_wasm";
+import {
+    cryptoBoxSeal,
+    lockerPrepareFileLinkPayload,
+} from "../locker/pkg/ente_locker_wasm";
 
 afterEach(() => vi.unstubAllGlobals());
+
+test("Photos deletion keeps summary fallback and decrypts the challenge in Rust", async () => {
+    const masterKey = await generateKey();
+    const input = await sessionKeyAttributes(masterKey);
+    const encryptedChallenge = cryptoBoxSeal(
+        Buffer.from("deletion-jwt").toString("base64"),
+        input.keyAttributes.publicKey,
+    );
+    const summary = {
+        photosAndVideosCount: 12,
+        authenticatorCodesCount: 3,
+        lockerRecordsCount: 4,
+    };
+    let summaryStatus = 404;
+    let feedback: string | undefined;
+    let deletions = 0;
+    mockFetch(async (request) => {
+        expect(request.headers.get("X-Auth-Token")).toBe("test-token");
+        switch (new URL(request.url).pathname) {
+            case "/users/deletion-summary":
+                return summaryStatus == 200
+                    ? Response.json(summary)
+                    : new Response(null, { status: summaryStatus });
+            case "/users/delete-challenge":
+                return Response.json({ encryptedChallenge });
+            case "/users/delete":
+                expect(request.method).toBe("DELETE");
+                expect(await request.json()).toStrictEqual({
+                    challenge: "deletion-jwt",
+                    reasonCategory: "not_listed",
+                    ...(feedback && { feedback }),
+                });
+                deletions++;
+                return Response.json({});
+            default:
+                throw new Error(`Unexpected request: ${request.url}`);
+        }
+    });
+    const session = await photos.openSession({
+        baseUrl: "http://localhost",
+        authToken: "test-token",
+        masterKeyB64: masterKey,
+        ...input,
+    });
+    try {
+        expect(await photos.getAccountDeletionSummary(session)).toBeUndefined();
+        summaryStatus = 200;
+        expect(await photos.getAccountDeletionSummary(session)).toStrictEqual(
+            summary,
+        );
+        summaryStatus = 500;
+        await expect(photos.getAccountDeletionSummary(session)).rejects.toThrow(
+            "HTTP 500",
+        );
+        const challenge = await photos.getAccountDeleteChallenge(session);
+        expect(challenge).toBe(encryptedChallenge);
+        for (feedback of ["Feedback", undefined]) {
+            await photos.deleteAccount(
+                session,
+                challenge,
+                "not_listed",
+                feedback,
+            );
+        }
+        expect(deletions).toBe(2);
+    } finally {
+        session.free();
+    }
+});
 
 test.each(["classical", "post-quantum"])(
     "Photos %s Cast payloads round-trip and enforce safe collection IDs",

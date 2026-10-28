@@ -1,0 +1,1 @@
+- Fixed iOS logout stopping when a notification key could not be deleted.
