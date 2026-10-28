@@ -6,6 +6,7 @@ import {
     DashboardSquare01Icon,
     Home01Icon,
     Link04Icon,
+    Location01Icon,
     Settings01Icon,
     Upload01Icon,
     User02Icon,
@@ -41,7 +42,9 @@ import {
     type GalleryBarImplProps,
     type GalleryBarPresentationProps,
 } from "./BarImpl";
+import { NavigationSlide } from "./NavigationSlide";
 import type { GalleryBarMode } from "./reducer";
+import { useNavigationContentMotion } from "./use-navigation-content-motion";
 
 type GalleryNavigation = Omit<
     GalleryBarImplProps,
@@ -55,6 +58,9 @@ type PhotosNavigationShellProps = SearchBarProps & {
     onSidebar: () => void;
     onUpload: () => void;
     onHome: () => void;
+    onShowMap: () => void;
+    isMapView: boolean;
+    isMapSelected: boolean;
     mode: GalleryBarMode;
     onChangeMode: (mode: GalleryBarMode) => boolean;
 };
@@ -75,13 +81,28 @@ export const PhotosNavigationShell: React.FC<
     ...props
 }) => {
     const isOffline = useIsOffline();
-    const [railOpen, setRailOpen] = useState(true);
+    const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
     const [navigationCollapsed, setNavigationCollapsed] = useState(false);
-    const toggleRail = () => setRailOpen((open) => !open);
     const mobile = useMediaQuery(useTheme().breakpoints.down("md"));
+    const navigationAvailable = !!galleryNavigation && !props.isInSearchMode;
+    const panelOpen = navigationAvailable && !navigationCollapsed;
+    const contentRef = useNavigationContentMotion(
+        `${mobile}-${panelOpen}`,
+        reduceMotion,
+    );
     const { show: showMobileNavigation, props: mobileDrawerProps } =
         useModalVisibility();
     const { onClose: closeMobileNavigation } = mobileDrawerProps;
+    const navigationOpen =
+        navigationAvailable && (mobile ? mobileDrawerProps.open : panelOpen);
+    const toggleNavigation = () => {
+        if (mobile) {
+            if (mobileDrawerProps.open) closeMobileNavigation();
+            else showMobileNavigation();
+        } else {
+            setNavigationCollapsed((collapsed) => !collapsed);
+        }
+    };
     const { onSelectCollectionID } = galleryNavigation ?? {};
     const { onSelectPerson } = props;
     const selectCollection = useCallback(
@@ -107,7 +128,7 @@ export const PhotosNavigationShell: React.FC<
     };
     useEffect(() => {
         setNavigationCollapsed(false);
-    }, [props.mode, props.isInSearchMode]);
+    }, [props.mode, props.isInSearchMode, props.isMapSelected]);
     useEffect(() => {
         if (!mobile) closeMobileNavigation();
     }, [mobile, closeMobileNavigation]);
@@ -143,6 +164,21 @@ export const PhotosNavigationShell: React.FC<
         setNavigationCollapsed(false);
         if (mobile) showMobileNavigation();
     };
+    const galleryBar = galleryNavigation && (
+        <GalleryBarImpl
+            {...galleryNavigation}
+            mode={props.mode}
+            collapsed={!panelOpen}
+            mobileDrawerProps={mobileDrawerProps}
+            onCreateAlbum={openAlbumCreation}
+            onSelectCollectionID={selectCollection}
+            onSelectPlace={(place) => {
+                galleryNavigation.onSelectPlace(place);
+                closeMobileNavigation();
+            }}
+            onSelectPerson={selectPerson}
+        />
+    );
     return (
         <Stack
             sx={(theme) => ({
@@ -151,8 +187,9 @@ export const PhotosNavigationShell: React.FC<
                 minHeight: 0,
                 bgcolor: "#F4F4F4",
                 ...theme.applyStyles("light", {
-                    "& > :first-child .MuiButton-colorSecondary, & > :last-child > nav .MuiButton-colorSecondary":
-                        { "--mui-palette-secondary-main": "#FFFFFF" },
+                    "& > :first-child .MuiButton-colorSecondary": {
+                        "--mui-palette-secondary-main": "#FFFFFF",
+                    },
                 }),
                 ...theme.applyStyles("dark", { bgcolor: "#161616" }),
             })}
@@ -168,7 +205,11 @@ export const PhotosNavigationShell: React.FC<
                 {alternateHeader ?? (
                     <NormalHeaderContents
                         onUpload={props.onUpload}
-                        {...{ railOpen, toggleRail }}
+                        {...{
+                            navigationAvailable,
+                            navigationOpen,
+                            toggleNavigation,
+                        }}
                     />
                 )}
             </NavbarBase>
@@ -178,44 +219,62 @@ export const PhotosNavigationShell: React.FC<
                     flex: 1,
                     minWidth: 0,
                     minHeight: 0,
-                    p: {
-                        xs: railOpen ? "0 8px 8px 0" : "0 8px 8px",
-                        sm: railOpen ? "0 11px 11px 0" : "0 11px 11px",
-                    },
+                    overflow: "clip",
+                    p: { xs: "0 8px 8px 0", sm: "0 11px 11px 0" },
                 }}
             >
-                <Box
-                    component="nav"
-                    sx={{
-                        display: railOpen ? "flex" : "none",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        flexShrink: 0,
-                        width: { xs: "56px", sm: "72px" },
-                        px: { xs: "9px", sm: "14px" },
-                        gap: "12px",
-                    }}
+                <NavigationSlide
+                    open
+                    width={{ xs: 56, sm: 72 }}
+                    reduceMotion={reduceMotion}
+                    rail
                 >
-                    {alternateHeader == null && (
-                        <NormalNavigationRail
-                            {...props}
-                            isHome={
-                                props.mode == "albums" &&
-                                !props.isInSearchMode &&
-                                galleryNavigation?.activeCollectionID ==
-                                    PseudoCollectionID.all
-                            }
-                            onChangeMode={handleChangeMode}
-                            opensDialog={mobile}
-                            navigationOpen={
-                                !!galleryNavigation &&
-                                (mobile
-                                    ? mobileDrawerProps.open
-                                    : !navigationCollapsed)
-                            }
-                        />
-                    )}
-                </Box>
+                    <Box
+                        component="nav"
+                        sx={(theme) => ({
+                            display: "flex",
+                            height: "100%",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            flexShrink: 0,
+                            width: "100%",
+                            px: { xs: "9px", sm: "14px" },
+                            gap: "12px",
+                            ...theme.applyStyles("light", {
+                                "& .MuiButton-colorSecondary": {
+                                    "--mui-palette-secondary-main": "#FFFFFF",
+                                },
+                            }),
+                        })}
+                    >
+                        {alternateHeader == null && (
+                            <NormalNavigationRail
+                                {...props}
+                                onShowMap={() => {
+                                    props.onShowMap();
+                                    setNavigationCollapsed(false);
+                                    if (mobile) showMobileNavigation();
+                                }}
+                                isHome={
+                                    !props.isMapSelected &&
+                                    props.mode == "albums" &&
+                                    !props.isInSearchMode &&
+                                    galleryNavigation?.activeCollectionID ==
+                                        PseudoCollectionID.all
+                                }
+                                onChangeMode={handleChangeMode}
+                                opensDialog={mobile}
+                                navigationOpen={
+                                    !props.isMapSelected &&
+                                    !!galleryNavigation &&
+                                    (mobile
+                                        ? mobileDrawerProps.open
+                                        : !navigationCollapsed)
+                                }
+                            />
+                        )}
+                    </Box>
+                </NavigationSlide>
                 <Stack
                     sx={{
                         flex: 1,
@@ -226,15 +285,14 @@ export const PhotosNavigationShell: React.FC<
                 >
                     {galleryNavigation && !props.isInSearchMode && (
                         <>
-                            <GalleryBarImpl
-                                {...galleryNavigation}
-                                mode={props.mode}
-                                collapsed={!railOpen || navigationCollapsed}
-                                mobileDrawerProps={mobileDrawerProps}
-                                onCreateAlbum={openAlbumCreation}
-                                onSelectCollectionID={selectCollection}
-                                onSelectPerson={selectPerson}
-                            />
+                            <NavigationSlide
+                                open={panelOpen}
+                                width={328}
+                                reduceMotion={reduceMotion}
+                                disabled={mobile}
+                            >
+                                {galleryBar}
+                            </NavigationSlide>
                             <CreateAlbumDialog
                                 {...albumNameInputVisibilityProps}
                                 isHidden={createInHiddenSection}
@@ -244,6 +302,7 @@ export const PhotosNavigationShell: React.FC<
                         </>
                     )}
                     <Stack
+                        ref={contentRef}
                         sx={{ flex: 1, minWidth: 0, minHeight: 0, gap: "8px" }}
                     >
                         <Stack
@@ -251,11 +310,13 @@ export const PhotosNavigationShell: React.FC<
                                 flex: 1,
                                 minWidth: 0,
                                 minHeight: 0,
-                                pt: {
-                                    xs: `${thumbnailGridPadding}px`,
-                                    md: "36px",
-                                },
-                                px: { xs: 0, md: "12px" },
+                                pt: props.isMapView
+                                    ? 0
+                                    : {
+                                          xs: `${thumbnailGridPadding}px`,
+                                          md: "36px",
+                                      },
+                                px: props.isMapView ? 0 : { xs: 0, md: "12px" },
                                 "--mui-palette-background-default": "#FFFFFF",
                                 bgcolor: "background.default",
                                 borderRadius: "20px",
@@ -279,10 +340,11 @@ export const PhotosNavigationShell: React.FC<
 
 const NormalHeaderContents: React.FC<
     Pick<PhotosNavigationShellProps, "onUpload"> & {
-        railOpen: boolean;
-        toggleRail: () => void;
+        navigationAvailable: boolean;
+        navigationOpen: boolean;
+        toggleNavigation: () => void;
     }
-> = ({ onUpload, railOpen, toggleRail }) => {
+> = ({ onUpload, navigationAvailable, navigationOpen, toggleNavigation }) => {
     return (
         <Box
             sx={{
@@ -292,14 +354,25 @@ const NormalHeaderContents: React.FC<
                 flex: 1,
             }}
         >
-            <Tooltip title={railOpen ? ut("Hide sidebar") : ut("Show sidebar")}>
+            <Tooltip
+                title={
+                    !navigationAvailable
+                        ? ""
+                        : navigationOpen
+                          ? ut("Hide navigation panel")
+                          : ut("Show navigation panel")
+                }
+            >
                 <FocusVisibleButton
                     color="secondary"
                     aria-label={
-                        railOpen ? ut("Hide sidebar") : ut("Show sidebar")
+                        navigationOpen
+                            ? ut("Hide navigation panel")
+                            : ut("Show navigation panel")
                     }
-                    aria-expanded={railOpen}
-                    onClick={toggleRail}
+                    aria-expanded={navigationOpen}
+                    disabled={!navigationAvailable}
+                    onClick={toggleNavigation}
                     sx={{
                         minWidth: 0,
                         width: 38,
@@ -318,7 +391,7 @@ const NormalHeaderContents: React.FC<
                         <rect x="3" y="4" width="18" height="16" rx="3" />
                         <path
                             d={
-                                railOpen
+                                navigationOpen
                                     ? "M9 4v16M15 10l-2 2 2 2"
                                     : "M9 4v16M13 10l2 2-2 2"
                             }
@@ -344,7 +417,10 @@ const NormalHeaderContents: React.FC<
 };
 
 const NormalNavigationRail: React.FC<
-    Omit<PhotosNavigationShellProps, "onUpload" | "onChangeMode"> & {
+    Omit<
+        PhotosNavigationShellProps,
+        "onUpload" | "onChangeMode" | "isMapView"
+    > & {
         onChangeMode: (mode: GalleryBarMode) => void;
         isHome: boolean;
         opensDialog: boolean;
@@ -353,6 +429,8 @@ const NormalNavigationRail: React.FC<
 > = ({
     onSidebar,
     onHome,
+    onShowMap,
+    isMapSelected,
     mode,
     onChangeMode,
     isHome,
@@ -421,6 +499,34 @@ const NormalNavigationRail: React.FC<
                 </Tooltip>
             ),
         )}
+        <Tooltip title={t("map")}>
+            <FocusVisibleButton
+                color="secondary"
+                aria-label={t("map")}
+                aria-pressed={isMapSelected}
+                onClick={onShowMap}
+                sx={{
+                    minWidth: 0,
+                    width: 38,
+                    height: 38,
+                    flexShrink: 0,
+                    p: 0,
+                    borderRadius: "12px",
+                    color: "text.base",
+                    '&[aria-pressed="true"]': {
+                        color: "#FFFFFF",
+                        bgcolor: "accent.main",
+                        "&:hover": { bgcolor: "accent.main" },
+                    },
+                }}
+            >
+                <HugeiconsIcon
+                    icon={Location01Icon}
+                    size={20}
+                    strokeWidth={1.8}
+                />
+            </FocusVisibleButton>
+        </Tooltip>
         <Box sx={{ flex: 1 }} />
         <Tooltip title={t("settings")}>
             <FocusVisibleButton

@@ -115,8 +115,6 @@ class FlagService {
   bool get isSocialEnabled =>
       internalUser || _isServerFlagEnabled(_commentsFlag);
 
-  bool get enableMemoryShareLink => true;
-
   bool get enableMLInBackground => true;
 
   bool get useRustForHeicDecoder => internalUser;

@@ -279,6 +279,7 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
       return;
     }
 
+    var filesChanged = false;
     final currentSuggestion = allSuggestions[currentSuggestionIndex];
     final List<EnteFile> sortedFiles = List<EnteFile>.from(
       currentSuggestion.filesInCluster,
@@ -290,10 +291,11 @@ class _PersonGallerySuggestionState extends State<PersonGallerySuggestion>
         personID: relevantPerson,
         clusterID: currentSuggestion.clusterIDToMerge,
         showNamingBanner: false,
+        onFilesChanged: () => filesChanged = true,
       ),
     );
     if (!mounted) return;
-    if (_suggestionsInvalidated) {
+    if (filesChanged || _suggestionsInvalidated) {
       await _reloadSuggestions();
     } else if (result == ClusterPageResult.ignoredPerson) {
       await _consumeCurrentSuggestionAfterExternalAction();

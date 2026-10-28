@@ -33,6 +33,7 @@ import {
     useTheme,
 } from "@mui/material";
 import type { ModalVisibilityProps } from "ente-base/components/utils/modal";
+import type { EnteFile } from "ente-media/file";
 import { ItemCard } from "ente-new/photos/components/Tiles";
 import {
     PseudoCollectionID,
@@ -58,6 +59,7 @@ import {
     areEqual,
     type ListChildComponentProps,
 } from "react-window";
+import { PlacesList, type PlaceSelection } from "./PlacesList";
 import type { GalleryBarMode } from "./reducer";
 
 export interface GalleryBarPresentationProps {
@@ -67,11 +69,15 @@ export interface GalleryBarPresentationProps {
 
 export interface GalleryBarImplProps extends GalleryBarPresentationProps {
     mode: GalleryBarMode;
+    placesFiles?: EnteFile[];
+    selectedPlace?: PlaceSelection;
+    onSelectPlace: (place: PlaceSelection | undefined) => void;
     albumFilter: AlbumFilter;
     albumSearchQuery: string;
     onAlbumSearchQueryChange: (query: string) => void;
     onShowAlbumOverview: (filter: AlbumFilter) => void;
     onShowPeopleOverview: () => void;
+    onShowLinksOverview: () => void;
     collectionSummaries: CollectionSummary[];
     visibleAlbumFilters: typeof albumFilters;
     uncategorizedCollectionSummaryID: number;
@@ -93,11 +99,15 @@ export interface GalleryBarImplProps extends GalleryBarPresentationProps {
 
 export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
     mode,
+    placesFiles,
+    selectedPlace,
+    onSelectPlace,
     albumFilter,
     albumSearchQuery,
     onAlbumSearchQueryChange,
     onShowAlbumOverview,
     onShowPeopleOverview,
+    onShowLinksOverview,
     collectionSummaries,
     visibleAlbumFilters,
     uncategorizedCollectionSummaryID,
@@ -120,10 +130,19 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
     const listRef = useRef<FixedSizeList | null>(null);
     const albumListRef = useRef<VariableSizeList | null>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const [placesSearchQuery, setPlacesSearchQuery] = useState("");
     const [peopleSearchQuery, setPeopleSearchQuery] = useState("");
-    const searchQuery = mode == "people" ? peopleSearchQuery : albumSearchQuery;
-    const setSearchQuery =
-        mode == "people" ? setPeopleSearchQuery : onAlbumSearchQueryChange;
+    const [groupExpanded, setGroupExpanded] = useState(true);
+    const searchQuery = placesFiles
+        ? placesSearchQuery
+        : mode == "people"
+          ? peopleSearchQuery
+          : albumSearchQuery;
+    const setSearchQuery = placesFiles
+        ? setPlacesSearchQuery
+        : mode == "people"
+          ? setPeopleSearchQuery
+          : onAlbumSearchQueryChange;
     const normalizedSearchQuery = searchQuery.trim().toLowerCase();
     const isSearching = !!normalizedSearchQuery;
     const matchingPeople = useMemo(
@@ -168,6 +187,7 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
     }, [albumFilter]);
     useEffect(() => {
         setPeopleSearchQuery("");
+        setGroupExpanded(true);
     }, [mode]);
 
     useEffect(() => {
@@ -178,6 +198,11 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
             setPeopleSearchQuery("");
         }
     }, [mode, mobile, mobileDrawerProps.open, collapsed]);
+
+    const isPlacesView = !!placesFiles;
+    useEffect(() => {
+        if (!isPlacesView) setPlacesSearchQuery("");
+    }, [isPlacesView]);
 
     useEffect(() => {
         if (isSearching) {
@@ -195,7 +220,10 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                 ? {
                       type: "collections",
                       collectionSummaries: displayedCollectionSummaries,
-                      indented: mode == "albums",
+                      indented:
+                          mode == "albums" ||
+                          mode == "links" ||
+                          mode == "hidden-albums",
                       activeCollectionID: activeCollectionID!,
                       onSelectCollectionID,
                   }
@@ -216,16 +244,17 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
         ],
     );
 
-    const title =
-        mode == "people"
-            ? t("people")
-            : mode == "links"
-              ? t("links")
-              : mode == "hidden-albums"
-                ? t("hidden_albums")
-                : mode == "archive-albums"
-                  ? t("section_archive")
-                  : t("albums");
+    const title = placesFiles
+        ? t("search_places")
+        : mode == "people"
+          ? t("people")
+          : mode == "links"
+            ? t("links")
+            : mode == "hidden-albums"
+              ? t("hidden_albums")
+              : mode == "archive-albums"
+                ? t("section_archive")
+                : t("albums");
 
     const albumShortcuts = [
         {
@@ -469,6 +498,11 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
         isSearching,
     ]);
 
+    const isGroupOverview =
+        mode == "links"
+            ? activeCollectionID === undefined
+            : activeCollectionID == PseudoCollectionID.hiddenItems;
+
     const navigation = (
         <Stack
             component="nav"
@@ -483,9 +517,8 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                 "--gallery-navigation-surface": "#FFFFFF",
                 "--gallery-navigation-hover":
                     "color-mix(in srgb, var(--mui-palette-text-base) 8%, var(--gallery-navigation-surface))",
-                display: collapsed && !mobile ? "none" : "flex",
                 flexShrink: 0,
-                width: mobile ? "100%" : 328,
+                width: "100%",
                 height: "100%",
                 minHeight: 0,
                 px: mobile ? "12px" : "16px",
@@ -530,7 +563,7 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                         lineHeight: mobile ? "26px" : "32px",
                     }}
                 >
-                    {mode == "people" ? (
+                    {mode == "people" && !placesFiles ? (
                         <ButtonBase
                             onClick={() => {
                                 setPeopleSearchQuery("");
@@ -555,33 +588,35 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                         title
                     )}
                 </Typography>
-                {mode != "people" ? (
-                    <CollectionsSortOptions
-                        variant="v2"
-                        activeSortBy={collectionsSortBy}
-                        onChangeSortBy={onChangeCollectionsSortBy}
-                    />
-                ) : (
-                    <PeopleSortOptions
-                        variant="v2"
-                        activeSortBy={peopleSortBy}
-                        onChangeSortBy={onChangePeopleSortBy}
-                    />
-                )}
-                {(mode == "albums" || mode == "hidden-albums") && (
-                    <Tooltip title={t("new_album")}>
-                        <IconButton
-                            aria-label={t("new_album")}
-                            aria-haspopup="dialog"
-                            onClick={() => {
-                                mobileDrawerProps.onClose();
-                                onCreateAlbum();
-                            }}
-                        >
-                            <AddIcon sx={{ fontSize: 20 }} />
-                        </IconButton>
-                    </Tooltip>
-                )}
+                {!placesFiles &&
+                    (mode != "people" ? (
+                        <CollectionsSortOptions
+                            variant="v2"
+                            activeSortBy={collectionsSortBy}
+                            onChangeSortBy={onChangeCollectionsSortBy}
+                        />
+                    ) : (
+                        <PeopleSortOptions
+                            variant="v2"
+                            activeSortBy={peopleSortBy}
+                            onChangeSortBy={onChangePeopleSortBy}
+                        />
+                    ))}
+                {!placesFiles &&
+                    (mode == "albums" || mode == "hidden-albums") && (
+                        <Tooltip title={t("new_album")}>
+                            <IconButton
+                                aria-label={t("new_album")}
+                                aria-haspopup="dialog"
+                                onClick={() => {
+                                    mobileDrawerProps.onClose();
+                                    onCreateAlbum();
+                                }}
+                            >
+                                <AddIcon sx={{ fontSize: 20 }} />
+                            </IconButton>
+                        </Tooltip>
+                    )}
                 {mobile && (
                     <IconButton
                         aria-label={t("close")}
@@ -596,6 +631,7 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                 sx={{
                     alignItems: "center",
                     flexShrink: 0,
+                    display: "flex",
                     height: 52,
                     gap: "10px",
                     px: "16px",
@@ -615,19 +651,23 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                     inputRef={searchInputRef}
                     fullWidth
                     placeholder={t(
-                        mode == "people"
-                            ? "people_search_hint"
-                            : mode == "links"
-                              ? "search_links"
-                              : "search_in_albums",
+                        placesFiles
+                            ? "search_in_places"
+                            : mode == "people"
+                              ? "people_search_hint"
+                              : mode == "links"
+                                ? "search_links"
+                                : "search_in_albums",
                     )}
                     inputProps={{
                         "aria-label": t(
-                            mode == "people"
-                                ? "people_search_hint"
-                                : mode == "links"
-                                  ? "search_links"
-                                  : "search_in_albums",
+                            placesFiles
+                                ? "search_in_places"
+                                : mode == "people"
+                                  ? "people_search_hint"
+                                  : mode == "links"
+                                    ? "search_links"
+                                    : "search_in_albums",
                         ),
                     }}
                     value={searchQuery}
@@ -655,10 +695,17 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                     </IconButton>
                 )}
             </Stack>
-            {isSearching &&
-            (mode == "albums"
-                ? !visibleAlbumFilters.length && !albumShortcuts.length
-                : !getItemCount(itemData)) ? (
+            {placesFiles ? (
+                <PlacesList
+                    files={placesFiles}
+                    searchQuery={placesSearchQuery}
+                    selectedPlace={selectedPlace}
+                    onSelectPlace={onSelectPlace}
+                />
+            ) : isSearching &&
+              (mode == "albums"
+                  ? !visibleAlbumFilters.length && !albumShortcuts.length
+                  : !getItemCount(itemData)) ? (
                 searchEmptyState
             ) : mode == "albums" ? (
                 <Box
@@ -687,6 +734,47 @@ export const GalleryBarImpl: React.FC<GalleryBarImplProps> = ({
                         )}
                     </AutoSizer>
                 </Box>
+            ) : mode == "links" || mode == "hidden-albums" ? (
+                <Stack
+                    role="group"
+                    aria-label={t(mode == "links" ? "links" : "section_hidden")}
+                    sx={{ flex: 1, minHeight: 0, minWidth: 0 }}
+                >
+                    <BarCard
+                        aria-current={isGroupOverview ? "page" : undefined}
+                        aria-expanded={isSearching || groupExpanded}
+                        onClick={() => {
+                            setGroupExpanded(
+                                !isGroupOverview || !groupExpanded,
+                            );
+                            if (mode == "links") onShowLinksOverview();
+                            else
+                                onSelectCollectionID(
+                                    PseudoCollectionID.hiddenItems,
+                                );
+                            mobileDrawerProps.onClose();
+                        }}
+                        sx={{ flexShrink: 0, height: rowHeight }}
+                    >
+                        <CardText>
+                            {t(mode == "links" ? "links" : "section_hidden")}
+                        </CardText>
+                        <Box
+                            component={HugeiconsIcon}
+                            icon={ArrowDown01Icon}
+                            size={16}
+                            strokeWidth={1.8}
+                            sx={{
+                                color: "text.muted",
+                                transform:
+                                    isSearching || groupExpanded
+                                        ? undefined
+                                        : "rotate(-90deg)",
+                            }}
+                        />
+                    </BarCard>
+                    {(isSearching || groupExpanded) && items}
+                </Stack>
             ) : (
                 items
             )}

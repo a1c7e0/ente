@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth;
 pub mod client;
+pub mod deletion;
 pub mod error;
 pub mod lifecycle;
 pub mod login;

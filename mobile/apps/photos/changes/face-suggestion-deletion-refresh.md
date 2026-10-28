@@ -1,0 +1,1 @@
+- Refresh face suggestions after deleting or hiding photos in their preview, so removed photos cannot be reopened from a stale suggestion.

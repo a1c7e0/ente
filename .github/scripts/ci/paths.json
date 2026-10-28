@@ -155,6 +155,7 @@
         "rust/crates/core/**",
         "rust/crates/ensu-crypto/**",
         "rust/crates/legacy/**",
+        "rust/crates/location/**",
         "rust/crates/locker/**",
         "rust/crates/paste/**",
         "rust/crates/space/**",

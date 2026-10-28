@@ -200,10 +200,7 @@ Future<void> _init(bool bool, {String? via}) async {
       Configuration.instance,
       hideAppContentDefault: true,
     );
-    AccountDeletionSettings.instance.init(
-      host: Configuration.instance,
-      enteDio: Network.instance.enteDio,
-    );
+    AccountDeletionSettings.instance.init(host: Configuration.instance);
     await CollectionApiClient.instance.init();
     await CollectionService.instance.init(preferences);
     await FavoritesService.instance.init();

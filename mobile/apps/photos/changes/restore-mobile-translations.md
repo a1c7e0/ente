@@ -1,0 +1,1 @@
+- Restored missing translations and clarified photo sharing permissions and storage cleanup.

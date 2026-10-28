@@ -16,6 +16,7 @@ import 'package:ente_auth/services/notification_service.dart';
 import 'package:ente_auth/services/preference_service.dart';
 import 'package:ente_auth/services/update_service.dart';
 import 'package:ente_auth/services/window_listener_service.dart';
+import 'package:ente_auth/src/rust/frb_generated.dart';
 import 'package:ente_auth/store/authenticator_db.dart';
 import 'package:ente_auth/store/code_display_store.dart';
 import 'package:ente_auth/store/code_store.dart';
@@ -142,7 +143,7 @@ Future<void> _runInForeground() async {
   return await _runWithLogs(() async {
     _logger.info("Starting app in foreground");
     try {
-      await _init(false, via: 'mainMethod');
+      await _init();
     } catch (e, s) {
       _logger.severe("Failed to init", e, s);
       rethrow;
@@ -198,9 +199,10 @@ void _registerWindowsProtocol() {
   }
 }
 
-Future<void> _init(bool bool, {String? via}) async {
+Future<void> _init() async {
   _registerWindowsProtocol();
   await CryptoUtil.init();
+  await EnteAuthRust.init();
 
   await PreferenceService.instance.init();
   await CodeStore.instance.init();
@@ -222,10 +224,7 @@ Future<void> _init(bool bool, {String? via}) async {
   if (shouldAllowAuthScreenCapture) {
     await LockScreenSettings.instance.setHideAppContent(false, persist: false);
   }
-  AccountDeletionSettings.instance.init(
-    host: Configuration.instance,
-    enteDio: Network.instance.enteDio,
-  );
+  AccountDeletionSettings.instance.init(host: Configuration.instance);
   await LocalBackupService.instance.init(
     hasOptedForOfflineMode: Configuration.instance.hasOptedForOfflineMode(),
   );
