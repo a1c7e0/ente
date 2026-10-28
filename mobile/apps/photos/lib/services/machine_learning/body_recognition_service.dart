@@ -207,7 +207,7 @@ class BodyRecognitionService {
     return result;
   }
 
-  Future<Map<int, EnteFile>> filesByKey(List<EnteFile> files) async => {
+  Map<int, EnteFile> filesByKey(List<EnteFile> files) => {
     for (final file in files)
       if (file.uploadedFileID != null) file.uploadedFileID!: file,
   };
@@ -235,7 +235,7 @@ class BodyRecognitionService {
         facePersons.putIfAbsent(faceID, () => "cluster:${cluster.key}");
       }
     }
-    final keyedFiles = await filesByKey(files);
+    final keyedFiles = filesByKey(files);
     final times = {
       for (final entry in keyedFiles.entries)
         if (entry.value.creationTime != null)
@@ -270,7 +270,7 @@ class BodyRecognitionService {
       return _groups;
     }
     if (_groupMatchKey != matchKey) {
-      final keyedFiles = await filesByKey(files);
+      final keyedFiles = filesByKey(files);
       _groups = groupBodyMatches(matchesForFiles, {
         for (final entry in keyedFiles.entries)
           if (entry.value.creationTime != null)
@@ -286,11 +286,12 @@ class BodyRecognitionService {
     List<EnteFile> files,
   ) async {
     final db = MLDataDB.instance;
-    final clusterFiles = await db.getFileIdToClusterIds();
-    final keyedFiles = await filesByKey(files);
+    final clusterFiles = await db.getFileIdToClusterIDSetForCluster({
+      clusterID,
+    });
+    final keyedFiles = filesByKey(files);
     final ids = {
-      for (final entry in clusterFiles.entries)
-        if (entry.value.contains(clusterID)) entry.key,
+      ...clusterFiles.keys,
       for (final match in await matches(files))
         if (match.automatic && match.personID == "cluster:$clusterID")
           match.fileID,
