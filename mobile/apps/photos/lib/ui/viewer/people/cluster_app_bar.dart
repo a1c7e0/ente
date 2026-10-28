@@ -22,29 +22,40 @@ import 'package:photos/services/collections_service.dart';
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/face_ml/feedback/cluster_feedback.dart";
 import "package:photos/services/machine_learning/ml_result.dart";
-import "package:photos/theme/ente_theme.dart";
 import 'package:photos/ui/actions/collection/collection_sharing_actions.dart';
 import 'package:photos/ui/components/buttons/button_widget.dart';
 import 'package:photos/ui/sharing/share_person_sheet.dart';
 import "package:photos/ui/viewer/gallery/gallery_app_bar_actions.dart";
 import "package:photos/ui/viewer/gallery/gallery_app_bar_config.dart";
+import "package:photos/ui/viewer/gallery/gallery_app_bar_widget.dart";
 import 'package:photos/ui/viewer/gallery/state/gallery_files_inherited_widget.dart';
 import "package:photos/ui/viewer/people/cluster_breakup_page.dart";
 import "package:photos/ui/viewer/people/cluster_page.dart";
+import "package:photos/ui/viewer/people/person_face_widget.dart";
 import "package:photos/utils/dialog_util.dart";
 
 class ClusterAppBar extends StatefulWidget {
-  static const double _sliverExpandedHeight = 92.0;
-
   static GalleryAppBarConfig sliverConfig(
     GalleryType type,
     String? title,
     SelectedFiles selectedFiles,
     String clusterID, {
+    required List<EnteFile> files,
+    Key? coverAppBarKey,
+    String? coverHeroTag,
     bool memoryLaneReady = false,
     Future<void> Function()? onMemoryLaneTap,
   }) {
+    final config = GalleryAppBarWidget.sliverConfig(
+      type,
+      title,
+      selectedFiles,
+      coverWidget: files.isEmpty
+          ? null
+          : PersonFaceWidget(clusterID: clusterID),
+    );
     return GalleryAppBarConfig(
+      extendBodyForCollapse: config.extendBodyForCollapse,
       sliverBuilder: (_) => ClusterAppBar._(
         type,
         title,
@@ -52,15 +63,17 @@ class ClusterAppBar extends StatefulWidget {
         clusterID,
         memoryLaneReady,
         onMemoryLaneTap,
+        files,
+        coverAppBarKey,
+        coverHeroTag,
       ),
-      geometryBuilder: (context) => SliverAppBarComponent.resolveGeometry(
-        context,
-        expandedHeight: _sliverExpandedHeight,
-        collapsedHeight: kToolbarHeight,
-      ),
+      geometryBuilder: config.geometryBuilder,
     );
   }
 
+  final List<EnteFile> files;
+  final Key? coverAppBarKey;
+  final String? coverHeroTag;
   final GalleryType type;
   final String? title;
   final SelectedFiles selectedFiles;
@@ -75,6 +88,9 @@ class ClusterAppBar extends StatefulWidget {
     this.clusterID,
     this.memoryLaneReady,
     this.onMemoryLaneTap,
+    this.files,
+    this.coverAppBarKey,
+    this.coverHeroTag,
   );
 
   @override
@@ -134,16 +150,51 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
 
   @override
   Widget build(BuildContext context) {
-    return SliverAppBarComponent(
-      title: _appBarTitle ?? "",
-      actions: _getDefaultActions(context),
-      expandedHeight: ClusterAppBar._sliverExpandedHeight,
-      collapsedHeight: kToolbarHeight,
-      backgroundColor: getEnteColorScheme(context).backgroundColour,
-    );
+    final currentUserID = Configuration.instance.getUserID();
+    final shareableFiles =
+        widget.selectedFiles.files.isEmpty &&
+            !isLocalGalleryMode &&
+            Configuration.instance.hasConfiguredAccount()
+        ? GalleryFilesState.maybeOf(context)?.galleryFilesOrNull
+              ?.where(
+                (file) =>
+                    file.uploadedFileID != null &&
+                    file.ownerID == currentUserID,
+              )
+              .toList()
+        : null;
+    return GalleryAppBarWidget.sliverConfig(
+      widget.type,
+      _appBarTitle,
+      widget.selectedFiles,
+      files: widget.files,
+      coverAppBarKey: widget.coverAppBarKey,
+      coverWidget: widget.files.isEmpty
+          ? null
+          : PersonFaceWidget(
+              clusterID: widget.clusterID,
+              cachedPixelWidth:
+                  (MediaQuery.sizeOf(context).width *
+                          MediaQuery.devicePixelRatioOf(context))
+                      .ceil(),
+            ),
+      coverHeroTag: widget.coverHeroTag,
+      actionsBuilder: ({required onCover, foregroundColor}) =>
+          _getDefaultActions(
+            context,
+            onCover: onCover,
+            foregroundColor: foregroundColor,
+            shareableFiles: shareableFiles,
+          ),
+    ).buildSliver(context);
   }
 
-  List<Widget> _getDefaultActions(BuildContext context) {
+  List<Widget> _getDefaultActions(
+    BuildContext context, {
+    required bool onCover,
+    Color? foregroundColor,
+    required List<EnteFile>? shareableFiles,
+  }) {
     final hasAccount = Configuration.instance.hasConfiguredAccount();
     final List<Widget> actions = <Widget>[];
     if (widget.selectedFiles.files.isNotEmpty) {
@@ -151,24 +202,24 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
     }
 
     if (!isLocalGalleryMode && hasAccount) {
-      final currentUserID = Configuration.instance.getUserID();
-      final files = GalleryFilesState.maybeOf(context)?.galleryFilesOrNull
-          ?.where(
-            (file) =>
-                file.uploadedFileID != null && file.ownerID == currentUserID,
-          )
-          .toList();
-      if (files != null && files.isNotEmpty) {
+      if (shareableFiles != null && shareableFiles.isNotEmpty) {
         actions.add(
           IconButtonComponent(
             key: shareButtonKey,
-            icon: const HugeIcon(icon: HugeIcons.strokeRoundedShare08),
-            variant: IconButtonComponentVariant.primary,
+            icon: HugeIcon(
+              icon: HugeIcons.strokeRoundedShare08,
+              color: foregroundColor,
+            ),
+            variant: onCover
+                ? IconButtonComponentVariant.unfilled
+                : IconButtonComponentVariant.primary,
+            size: onCover ? kMinInteractiveDimension : 36,
+            iconSize: onCover ? IconSizes.medium : IconSizes.small,
             tooltip: context.strings.share,
             shouldSurfaceExecutionStates: false,
             onTap: () => showSharePersonSheet(
               context,
-              files: files,
+              files: shareableFiles,
               shareButtonKey: shareButtonKey,
             ),
           ),
@@ -217,10 +268,16 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
     ];
     if (items.isEmpty) return actions;
 
+    final overflowMenuAction = onCover
+        ? galleryAppBarActionsSheetAction
+        : galleryAppBarPopupMenuAction;
     actions.add(
-      galleryAppBarPopupMenuAction<ClusterPopupAction>(
+      overflowMenuAction<ClusterPopupAction>(
         tooltip: context.strings.more,
-        icon: const HugeIcon(icon: HugeIcons.strokeRoundedMoreVertical),
+        icon: HugeIcon(
+          icon: HugeIcons.strokeRoundedMoreVertical,
+          color: foregroundColor,
+        ),
         optionsBuilder: () => items,
         onSelected: (ClusterPopupAction value) async {
           if (value == ClusterPopupAction.breakupCluster) {

@@ -485,20 +485,40 @@ async fn srp_attributes(
 #[test]
 fn creation_enrollment_and_login_across_processes() -> ente_test_support::TestResult {
     use ente_test_support::{Museum, account_fixture::current_totp};
-    Museum::run_async(|origin| async move {
+    let inbox = super::mail::MailInbox::new();
+    let port = inbox.port.to_string();
+    let env = [
+        ("ENTE_SMTP_HOST", "127.0.0.1"),
+        ("ENTE_SMTP_PORT", &port),
+        ("ENTE_SMTP_USERNAME", ""),
+        ("ENTE_SMTP_PASSWORD", ""),
+        ("ENTE_SMTP_ENCRYPTION", ""),
+    ];
+    Museum::run_with_env(&env, |museum| {
+        let origin = museum.endpoint();
         let home = TestHome::new();
-        let email = format!("cli-create-{}@example.org", uuid::Uuid::new_v4());
+        let email = format!("cli-create-{}@example.com", uuid::Uuid::new_v4());
         home.json(&[
             "account",
             "request-otp",
             "--email",
             &email,
             "--host",
-            &origin,
+            origin,
             "--app",
             "auth",
         ]);
-        let input = json!({"password": " secret 🙂 ", "otp": "123456"});
+        let read_code = || {
+            let message = inbox.receive("Subject: Verification code:");
+            assert!(message.contains(&format!("RCPT TO:<{email}>")));
+            message
+                .lines()
+                .find_map(|line| line.strip_prefix("Subject: Verification code: "))
+                .unwrap()
+                .trim()
+                .to_owned()
+        };
+        let input = json!({"password": " secret 🙂 ", "otp": read_code()});
         let output = success(home.with_input(
             &[
                 "account",
@@ -506,7 +526,7 @@ fn creation_enrollment_and_login_across_processes() -> ente_test_support::TestRe
                 "--email",
                 &email,
                 "--host",
-                &origin,
+                origin,
                 "--app",
                 "auth",
                 "--input",
@@ -548,26 +568,56 @@ fn creation_enrollment_and_login_across_processes() -> ente_test_support::TestRe
             json!({"totpEnabled": true})
         );
         assert!(failure(&home.run(&["account", "totp", "setup"])).contains("already enabled"));
-        let second = TestHome::new();
-        let login =
-            json!({"password": " secret 🙂 ", "otp": "123456", "totp": current_totp(secret)?});
-        success(second.with_input(
+        success(home.with_input(
             &[
-                "account",
-                "login",
-                "--email",
-                &email,
-                "--account",
-                "personal",
-                "--app",
                 "auth",
-                "--host",
-                &origin,
-                "--input",
+                "api",
+                "/users/email-mfa",
+                "--method",
+                "PUT",
+                "--body",
                 "-",
             ],
-            &serde_json::to_vec(&login)?,
+            br#"{"isEnabled":true}"#,
         ));
+        let second = TestHome::new();
+        second.json(&[
+            "account",
+            "request-otp",
+            "--email",
+            &email,
+            "--host",
+            origin,
+            "--app",
+            "auth",
+            "--purpose",
+            "login",
+        ]);
+        let code = read_code();
+        let wrong_code = format!("{:06}", (code.parse::<u32>()? + 1) % 1_000_000);
+        let login = [
+            "account",
+            "login",
+            "--email",
+            &email,
+            "--account",
+            "personal",
+            "--app",
+            "auth",
+            "--host",
+            origin,
+            "--input",
+            "-",
+        ];
+        let mut input = json!({"password": " secret 🙂 ", "otp": wrong_code});
+        let error = failure(&second.with_input(&login, &serde_json::to_vec(&input)?));
+        assert!(
+            error.contains("Incorrect email verification code"),
+            "{error}"
+        );
+        input["otp"] = code.into();
+        input["totp"] = current_totp(secret)?.into();
+        success(second.with_input(&login, &serde_json::to_vec(&input)?));
         assert_eq!(
             home.json(&["account", "recovery-key"]),
             second.json(&["account", "recovery-key", "--account", "personal"])

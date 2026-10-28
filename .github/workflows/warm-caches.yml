@@ -165,6 +165,8 @@ jobs:
 
             - run: cargo codegen frb
 
+            - run: cargo clippy -p ente-auth-frb --features flutter --all-targets --locked
+
             - run: cargo clippy -p ente-photos-frb --features flutter --all-targets --locked
 
             - run: cargo clippy -p ente-locker-frb --features flutter --all-targets --locked

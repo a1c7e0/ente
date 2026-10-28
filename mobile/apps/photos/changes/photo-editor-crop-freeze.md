@@ -1,0 +1,1 @@
+- Fixed the photo editor getting stuck when opening crop and rotate.

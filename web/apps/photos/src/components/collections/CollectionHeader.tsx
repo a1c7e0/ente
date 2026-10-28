@@ -3,6 +3,7 @@ import { downloadAndSaveCollectionFiles } from "@/services/save";
 import {
     CleanIcon,
     Delete02Icon,
+    Download04Icon,
     Download05Icon,
     Edit02Icon,
     Logout01Icon,
@@ -98,12 +99,18 @@ export interface CollectionHeaderProps {
     onAddSaveGroup: AddSaveGroup;
     onShowMap: () => void;
     onBackToAlbums: () => void;
+    showBackToAlbums: boolean;
     onDescriptionHeightChange?: (height: number) => void;
 }
 
 export const CollectionHeader: React.FC<CollectionHeaderProps> = (props) => {
-    const { activeCollection, collectionSummary, onDescriptionHeightChange } =
-        props;
+    const {
+        activeCollection,
+        collectionSummary,
+        onBackToAlbums,
+        showBackToAlbums,
+        onDescriptionHeightChange,
+    } = props;
     const showCover = useMediaQuery(useTheme().breakpoints.up("sm"));
 
     const { name, type, attributes, fileCount } = collectionSummary;
@@ -157,12 +164,12 @@ export const CollectionHeader: React.FC<CollectionHeaderProps> = (props) => {
                         ...(isAlbum && { gridArea: "summary" }),
                     }}
                 >
-                    {(type == "hiddenItems" || type == "archiveItems") && (
+                    {isAlbum && showBackToAlbums && (
                         <Tooltip title={t("go_back")}>
                             <IconButton
                                 aria-label={t("go_back")}
-                                onClick={props.onBackToAlbums}
-                                sx={{ width: 32, height: 32 }}
+                                onClick={onBackToAlbums}
+                                sx={{ width: 32, height: 32, flexShrink: 0 }}
                             >
                                 <ArrowBackIcon sx={{ fontSize: 20 }} />
                             </IconButton>
@@ -700,23 +707,30 @@ const CollectionHeaderOptions: React.FC<CollectionHeaderProps> = ({
 
     if (isSmallWidth) {
         menuOptions.unshift(
-            showDownloadQuickOption(collectionSummary) && fileCount > 0 && (
-                <ContextMenuItem
-                    key="download"
-                    disabled={
-                        hasActiveFileSelection ||
-                        isActiveCollectionDownloadInProgress()
-                    }
-                    onClick={downloadCollection}
-                >
-                    {isActiveCollectionDownloadInProgress() ? (
-                        <ActivityIndicator size="20px" />
-                    ) : (
-                        <DownloadIcon />
-                    )}
-                    {downloadOptionLabel(collectionSummary)}
-                </ContextMenuItem>
-            ),
+            collectionSummaryType != "hiddenItems" &&
+                showDownloadQuickOption(collectionSummary) &&
+                fileCount > 0 && (
+                    <ContextMenuItem
+                        key="download"
+                        disabled={
+                            hasActiveFileSelection ||
+                            isActiveCollectionDownloadInProgress()
+                        }
+                        onClick={downloadCollection}
+                    >
+                        {isActiveCollectionDownloadInProgress() ? (
+                            <ActivityIndicator size="20px" />
+                        ) : (
+                            <HugeiconsIcon
+                                icon={Download04Icon}
+                                size={22}
+                                strokeWidth={1.5}
+                                aria-hidden
+                            />
+                        )}
+                        {downloadOptionLabel(collectionSummary)}
+                    </ContextMenuItem>
+                ),
             showShareQuickOption(collectionSummary) && (
                 <ContextMenuItem
                     key="share"
@@ -872,7 +886,7 @@ const QuickOptions: React.FC<QuickOptionsProps> = ({
                     onClick={onEmptyTrashClick}
                 />
             )}
-            {!isSmallWidth &&
+            {(!isSmallWidth || collectionSummary.type == "hiddenItems") &&
                 showDownloadQuickOption(collectionSummary) &&
                 collectionSummary.fileCount > 0 &&
                 (isDownloadInProgress() ? (
@@ -980,23 +994,6 @@ type DownloadQuickOptionProps = OptionProps & {
     collectionSummary: CollectionSummary;
 };
 
-const DownloadIcon: React.FC = () => (
-    <svg
-        width="22"
-        height="22"
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-    >
-        <path d="M2.99969 17.0002C2.99969 17.9302 2.99969 18.3952 3.10192 18.7767C3.37932 19.8119 4.18796 20.6206 5.22324 20.898C5.60474 21.0002 6.06972 21.0002 6.99969 21.0002L16.9997 21.0002C17.9297 21.0002 18.3947 21.0002 18.7762 20.898C19.8114 20.6206 20.6201 19.8119 20.8975 18.7767C20.9997 18.3952 20.9997 17.9302 20.9997 17.0002" />
-        <path d="M16.4998 11.5002C16.4998 11.5002 13.1856 16.0002 11.9997 16.0002C10.8139 16.0002 7.49976 11.5002 7.49976 11.5002M11.9997 15.0002V3.00016" />
-    </svg>
-);
-
 const DownloadQuickOption: React.FC<DownloadQuickOptionProps> = ({
     collectionSummary,
     disabled,
@@ -1004,7 +1001,11 @@ const DownloadQuickOption: React.FC<DownloadQuickOptionProps> = ({
 }) => (
     <Tooltip title={downloadOptionLabel(collectionSummary)}>
         <span>
-            <IconButton disabled={disabled} onClick={onClick}>
+            <IconButton
+                disabled={disabled}
+                onClick={onClick}
+                aria-label={downloadOptionLabel(collectionSummary)}
+            >
                 <Box
                     sx={{
                         width: 24,
@@ -1014,7 +1015,12 @@ const DownloadQuickOption: React.FC<DownloadQuickOptionProps> = ({
                         justifyContent: "center",
                     }}
                 >
-                    <DownloadIcon />
+                    <HugeiconsIcon
+                        icon={Download04Icon}
+                        size={22}
+                        strokeWidth={1.5}
+                        aria-hidden
+                    />
                 </Box>
             </IconButton>
         </span>

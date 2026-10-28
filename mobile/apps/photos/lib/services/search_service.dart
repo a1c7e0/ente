@@ -63,6 +63,7 @@ import "package:photos/states/location_screen_state.dart";
 import "package:photos/ui/viewer/location/location_screen.dart";
 import "package:photos/ui/viewer/people/cluster_page.dart";
 import "package:photos/ui/viewer/people/people_page.dart";
+import "package:photos/ui/viewer/people/person_face_widget.dart";
 import "package:photos/ui/viewer/search/result/magic_result_screen.dart";
 import "package:photos/utils/cache_util.dart";
 import "package:photos/utils/people_sort_util.dart";
@@ -1367,6 +1368,7 @@ class SearchService {
     int? fallbackMinClusterSize,
     bool showIgnoredOnly = false,
     bool includeEmptyPersons = false,
+    String coverHeroTagPrefix = "people_search",
   }) async {
     try {
       if (isLocalGalleryMode) {
@@ -1425,9 +1427,14 @@ class SearchService {
                   ClusterPage(
                     files,
                     tagPrefix: "${ResultType.faces.toString()}_$clusterId",
+                    coverHeroTag: PersonFaceWidget.coverHeroTag(
+                      tagPrefix: coverHeroTagPrefix,
+                      clusterID: clusterId,
+                    ),
                     clusterID: clusterId,
                     showNamingBanner: false,
                   ),
+                  useFadeTransition: true,
                 );
               },
               hierarchicalSearchFilter: FaceFilter(
@@ -1607,6 +1614,10 @@ class SearchService {
                 ctx,
                 PeoplePage(
                   tagPrefix: "${ResultType.faces.toString()}_${p.data.name}",
+                  coverHeroTag: PersonFaceWidget.coverHeroTag(
+                    tagPrefix: coverHeroTagPrefix,
+                    personId: p.remoteID,
+                  ),
                   person: p,
                   searchResult: GenericSearchResult(
                     ResultType.faces,
@@ -1623,6 +1634,7 @@ class SearchService {
                     ),
                   ),
                 ),
+                useFadeTransition: true,
               );
             },
             hierarchicalSearchFilter: FaceFilter(
@@ -1687,8 +1699,13 @@ class SearchService {
                   ClusterPage(
                     files,
                     tagPrefix: "${ResultType.faces.toString()}_$clusterName",
+                    coverHeroTag: PersonFaceWidget.coverHeroTag(
+                      tagPrefix: coverHeroTagPrefix,
+                      clusterID: clusterId,
+                    ),
                     clusterID: clusterId,
                   ),
+                  useFadeTransition: true,
                 );
               },
               hierarchicalSearchFilter: FaceFilter(
@@ -1716,6 +1733,7 @@ class SearchService {
           minClusterSize: fallbackMinClusterSize,
           showIgnoredOnly: showIgnoredOnly,
           includeEmptyPersons: includeEmptyPersons,
+          coverHeroTagPrefix: coverHeroTagPrefix,
         );
       }
       if (facesResult.isEmpty) return [];
@@ -1950,6 +1968,7 @@ class SearchService {
                   matchedUploadedIDs: filesToUploadedFileIDs(files),
                 ),
               ),
+              useFadeTransition: true,
             );
           },
           hierarchicalSearchFilter: MagicFilter(

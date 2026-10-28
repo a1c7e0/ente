@@ -12,7 +12,6 @@ import type {
     EncryptedBoxB64,
     EncryptedFile,
     InitChunkDecryptionResult,
-    KeyPair,
     SodiumStateAddress,
 } from "./types";
 import type { CryptoWorker } from "./worker";
@@ -149,16 +148,6 @@ export const boxSeal = (data: string, publicKey: string): Promise<string> =>
     inWorker()
         ? libsodium.boxSeal(data, publicKey)
         : sharedWorker().then((w) => w.boxSeal(data, publicKey));
-
-export const boxSealOpenBytes = (
-    encryptedData: string,
-    keyPair: KeyPair,
-): Promise<Uint8Array> =>
-    inWorker()
-        ? libsodium.boxSealOpenBytes(encryptedData, keyPair)
-        : sharedWorker().then((w) =>
-              w.boxSealOpenBytes(encryptedData, keyPair),
-          );
 
 export const deriveKey = (
     passphrase: string,
