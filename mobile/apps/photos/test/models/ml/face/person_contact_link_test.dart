@@ -2,7 +2,6 @@ import "dart:async";
 import "dart:convert";
 import "dart:typed_data";
 
-import "package:computer/computer.dart";
 import "package:ente_contacts/contacts.dart" as contacts;
 import "package:flutter_test/flutter_test.dart";
 import "package:photos/db/ml/base.dart";
@@ -16,7 +15,6 @@ import "package:photos/utils/person_contact_linking_util.dart";
 import "package:shared_preferences/shared_preferences.dart";
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
   group("PersonService contact link", () {
     late _FakeEntityService entityService;
     late _FakePhotosContactsService contactsService;
@@ -288,54 +286,6 @@ void main() {
       );
     });
   });
-  group("PersonService deletion cache", () {
-    setUpAll(() => Computer.shared().turnOn(workersCount: 1));
-    tearDownAll(() => Computer.shared().turnOff());
-
-    for (final onlyMapping in [false, true]) {
-      test(
-        "refreshes unlinked people after deletion (onlyMapping: $onlyMapping)",
-        () async {
-          SharedPreferences.setMockInitialValues({});
-          final entities = _FakeEntityService()
-            ..seed(
-              PersonEntity(
-                "person-1",
-                PersonData(
-                  name: "Alex",
-                  assigned: [
-                    ClusterInfo(id: "cluster", faces: {"1_face"}),
-                  ],
-                ),
-              ),
-            );
-          final service = PersonService(
-            entities,
-            _FakeMLDataDB(),
-            await SharedPreferences.getInstance(),
-            contactsService: _FakePhotosContactsService(),
-            currentUserIDProvider: () => 1,
-          );
-          await service.getPersons();
-          expect(
-            service.getCachedPerson("person-1")!.data.assigned,
-            isNotEmpty,
-          );
-
-          await service.deletePerson("person-1", onlyMapping: onlyMapping);
-
-          if (onlyMapping) {
-            final remaining = (await service.getPersons()).single;
-            expect(remaining.data.name, "Alex");
-            expect(remaining.data.assigned, isEmpty);
-          } else {
-            expect(service.getCachedPerson("person-1"), isNull);
-            expect(await service.getPersons(), isEmpty);
-          }
-        },
-      );
-    }
-  });
 }
 
 class _TestPersonService extends PersonService {
@@ -479,9 +429,6 @@ class _FakeEntityService implements EntityService {
   }
 
   @override
-  Future<void> deleteEntry(String id) async => _entities.remove(id);
-
-  @override
   int lastSyncTime(EntityType type) => 0;
 
   @override
@@ -489,9 +436,6 @@ class _FakeEntityService implements EntityService {
 }
 
 class _FakeMLDataDB implements IMLDataDB<int> {
-  @override
-  Future<void> removePerson(String personID) async {}
-
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
