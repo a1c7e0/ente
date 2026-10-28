@@ -1,10 +1,12 @@
 import type { EnteFile } from "ente-media/file";
 import type { FaceCluster } from "ente-new/photos/services/ml/cluster";
 import { reconstructPeopleState } from "ente-new/photos/services/ml/people";
+import type { CGroup } from "ente-new/photos/services/user-entity";
 import { beforeEach, expect, test, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
     files: [] as EnteFile[],
+    cgroups: [] as CGroup[],
     clusters: [] as FaceCluster[],
     matches: [] as {
         fileID: number;
@@ -26,7 +28,7 @@ vi.mock("ente-new/photos/services/file", () => ({
     computeNormalCollectionFilesFromSaved: () => Promise.resolve(state.files),
 }));
 vi.mock("ente-new/photos/services/user-entity", () => ({
-    savedCGroups: () => Promise.resolve([]),
+    savedCGroups: () => Promise.resolve(state.cgroups),
     updateOrCreateUserEntities: vi.fn(),
     pullUserEntities: vi.fn(),
 }));
@@ -58,6 +60,7 @@ vi.mock("ente-new/photos/services/ml/kvdb", () => ({
 vi.mock("ente-new/photos/services/ml/math", () => ({ dotProduct: vi.fn() }));
 
 beforeEach(() => {
+    state.cgroups = [];
     state.files = Array.from(
         { length: 11 },
         (_, i) =>
@@ -121,4 +124,34 @@ test("body attachments do not satisfy the face-count visibility threshold", asyn
 
     expect(stateResult.people[0]!.fileIDs).toHaveLength(10);
     expect(stateResult.visiblePeople).toEqual([]);
+});
+
+test("body matches stay isolated between named people and unnamed clusters", async () => {
+    state.cgroups = [
+        {
+            id: "named-person",
+            data: {
+                name: "Alex",
+                assigned: [{ id: "named-cluster", faces: ["1_face"] }],
+                rejectedFaceIDs: [],
+                manuallyAssigned: [],
+            },
+        } as CGroup,
+    ];
+    state.matches.push({
+        ...state.matches[0]!,
+        fileID: 10,
+        personID: "named-person",
+    });
+
+    const result = await reconstructPeopleState();
+    expect(result.people.find((p) => p.id == "named-person")!.fileIDs).toEqual([
+        1, 10,
+    ]);
+    expect(
+        result.people.find((p) => p.id == "face-cluster")!.fileIDs,
+    ).toContain(11);
+    expect(
+        result.people.find((p) => p.id == "named-person")!.fileIDs,
+    ).not.toContain(11);
 });
