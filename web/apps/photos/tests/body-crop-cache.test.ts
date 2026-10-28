@@ -148,11 +148,11 @@ test("in-flight requests for old and new source revisions stay separate", async 
     await vi.waitFor(() => expect(resolveSources).toHaveLength(2));
 
     state.cropBlob = newCrop;
-    resolveSources[1](new Blob(["new source"]));
+    resolveSources[1]!(new Blob(["new source"]));
     await expect(newRequest).resolves.toBe(newCrop);
 
     state.cropBlob = oldCrop;
-    resolveSources[0](new Blob(["old source"]));
+    resolveSources[0]!(new Blob(["old source"]));
     await expect(oldRequest).resolves.toBe(oldCrop);
 
     expect(state.fetch).toHaveBeenCalledTimes(2);

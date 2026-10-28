@@ -130,13 +130,15 @@ test("body matches stay isolated between named people and unnamed clusters", asy
     state.cgroups = [
         {
             id: "named-person",
+            updatedAt: 0,
             data: {
                 name: "Alex",
+                isHidden: false,
                 assigned: [{ id: "named-cluster", faces: ["1_face"] }],
                 rejectedFaceIDs: [],
                 manuallyAssigned: [],
             },
-        } as CGroup,
+        },
     ];
     state.matches.push({
         ...state.matches[0]!,
