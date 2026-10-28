@@ -116,6 +116,13 @@ export const reconstructPeopleState = async (): Promise<PeopleState> => {
 
     const cgroups = await savedCGroups();
     const bodyMatches = await currentBodyMatches(normalCollectionFiles);
+    const bodyFileIDsByPersonID = new Map<string, Set<number>>();
+    for (const match of bodyMatches) {
+        if (!isAutomaticBodyMatch(match)) continue;
+        const fileIDs = bodyFileIDsByPersonID.get(match.personID) ?? new Set();
+        fileIDs.add(match.fileID);
+        bodyFileIDsByPersonID.set(match.personID, fileIDs);
+    }
     const cgroupPeople: Interim = cgroups.map((cgroup) => {
         const { id, data } = cgroup;
         const { name, assigned } = data;
@@ -144,9 +151,8 @@ export const reconstructPeopleState = async (): Promise<PeopleState> => {
         for (const fileID of data.manuallyAssigned) {
             if (fileByID.has(fileID)) fileIDsSet.add(fileID);
         }
-        for (const match of bodyMatches) {
-            if (match.personID == id && isAutomaticBodyMatch(match))
-                fileIDsSet.add(match.fileID);
+        for (const fileID of bodyFileIDsByPersonID.get(id) ?? []) {
+            fileIDsSet.add(fileID);
         }
         const fileIDs = [...fileIDsSet];
 
