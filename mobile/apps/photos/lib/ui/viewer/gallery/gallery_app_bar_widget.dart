@@ -55,7 +55,7 @@ import "package:photos/ui/viewer/gallery/hooks/add_photos_sheet.dart";
 import "package:photos/ui/viewer/gallery/hooks/album_sort_sheet.dart";
 import "package:photos/ui/viewer/gallery/hooks/edit_album_details_sheet.dart";
 import "package:photos/ui/viewer/gallery/state/inherited_search_filter_data.dart";
-import "package:photos/ui/viewer/hierarchicial_search/app_bar_filter_chips.dart";
+import "package:photos/ui/viewer/hierarchical_search/app_bar_filter_chips.dart";
 import "package:photos/ui/viewer/location/edit_location_sheet.dart";
 import 'package:photos/utils/dialog_util.dart';
 import 'package:photos/utils/magic_util.dart';

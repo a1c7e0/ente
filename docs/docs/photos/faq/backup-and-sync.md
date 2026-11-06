@@ -358,7 +358,13 @@ Ente backs up a single primary full-resolution image from the Burst. Additional 
 
 ### Why do I see duplicate files in the iOS app when the same photo is in an iCloud Shared Album? {#icloud-shared-album-duplicates}
 
-iCloud Shared Albums store compressed copies, not the original files. Because of this, Ente sees the shared-album copy as a different file, so it gets backed up separately and appears as a duplicate.
+It depends on the version the album was shared from.
+
+On iOS 26, iPadOS 26, and earlier, Shared Albums store a reduced copy, not the original. Photos are reduced to 2,048 pixels on the long edge, and videos are capped at 720p and 15 minutes. Ente sees that copy as a different file, so it is backed up separately and appears as a duplicate. An album created on those versions stays reduced until it is upgraded.
+
+Starting in iOS 27, iPadOS 27, and macOS 27, a new Shared Album stores photos and videos in their original formats at full resolution, and guests can add photos on the web. After an album is upgraded, photos and videos added from then on are full resolution ([Apple Support: Shared Albums limits](https://support.apple.com/en-us/148868)).
+
+Learn more in [Import from Apple Photos](/photos/migration/from-apple-photos/).
 
 ### Why is my Recents count lower in Ente than in the iOS Photos app? {#ios-recents-count-mismatch}
 
@@ -601,6 +607,17 @@ To manage your watch folders, click "Watch folders" in the sidebar to see the li
 If you delete a file from a watched folder on your computer, the corresponding file in Ente will be automatically moved to the [Uncategorized](/photos/faq/albums-and-organization#uncategorized) album. It won't be permanently deleted - you can still access it from the Uncategorized section.
 
 If you want to remove it completely from Ente, you'll need to manually delete it from the Uncategorized album.
+
+### Can I delete photos from my computer after a watch folder uploads them? {#delete-after-watch-folder-upload}
+
+Yes, but stop watching the folder first. Watch folders keep Ente in sync with your computer, so if you delete a file while its folder is being watched, Ente removes it from the album and moves it to [Uncategorized](/photos/faq/albums-and-organization#uncategorized).
+
+1. Wait for all uploads to finish.
+2. Click **Watch folders** in the sidebar, then click **Stop watching** next to the folder and confirm with **Yes, stop**. Your uploaded photos stay in Ente.
+3. Delete or reorganise the files on your computer.
+4. To keep syncing new photos, add an empty folder (or the same folder once it's cleared).
+
+For a one-time upload, use **Upload** or drag and drop instead. Files uploaded that way aren't linked to a folder, so deleting them on your computer doesn't affect Ente.
 
 ### Why don't metadata changes to a file in my watched folder show up in Ente? {#watch-folder-edited-files}
 

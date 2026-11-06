@@ -33,11 +33,8 @@ class _ClusterBreakupPageState extends State<ClusterBreakupPage> {
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (context) => ClusterPage(
-                    files,
-                    clusterID: clusterID,
-                    appendTitle: "(Analysis)",
-                  ),
+                  builder: (context) =>
+                      ClusterPage(files, clusterID: clusterID),
                 ),
               );
             },

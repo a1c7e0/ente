@@ -56,16 +56,16 @@ Yes! By default, the map view shows photos from all your albums. You can also:
 
 **From an album:**
 
-- Open any album
-- Tap the three dots menu
-- Select "Map"
+- Open an album with photos
+- On mobile, tap the map button on the album cover, or, after scrolling down, tap the three dots menu and select **Map**
+- On web and desktop, click the three dots menu on the right of the album header and select **Map**. For Favorites, click the globe button instead.
 - View only that album's photos on the map
 
 Learn more in the [Map and location guide](/photos/features/search-and-discovery/map-and-location).
 
 ### Why does the Map setting turn back on? {#map-turns-back-on}
 
-On mobile, opening the map from Search or an album turns Map back on so the view can load. If you want to keep it off, avoid opening either map view. If you opened one, turn Map off again in Settings.
+Opening a map view turns Map back on so the view can load. On mobile, this happens when you open the map from Search or an album. On web and desktop, it happens when you open an album's map. If you want to keep Map off, avoid opening these map views. If you opened one, turn Map off again in Settings on mobile, or in **Preferences > Map** on web and desktop.
 
 ## Location Tags
 
@@ -386,6 +386,22 @@ This can happen for a couple of reasons:
 **Solution:**
 
 Open `Settings > Machine learning` on mobile and enable local indexing. This lets your phone index the files itself instead of relying on indexes from a device that skipped them.
+
+### Why does Machine Learning stay just below 100%? {#ml-stuck-below-100}
+
+A percentage such as 99.9% means a small number of files are still in the pending count. If local indexing is off on mobile, some files may be waiting for another device to process them. See [why mobile and desktop can show different percentages](#ml-percentage-mismatch-across-platforms) for what to check.
+
+Some files may also be too large, damaged, or in a format the app cannot process yet. Those files can stay in the pending count, so the total does not reach 100%.
+
+Everything else is still indexed. Face search and magic search keep working for the files that succeeded.
+
+You do not need to do anything if search works for you. If you want help identifying the files still pending, please contact [support@ente.com](mailto:support@ente.com) and [share your logs](/photos/faq/troubleshooting#sharing-logs).
+
+### Why does my desktop app show different unnamed people than my phone? {#unnamed-people-differ}
+
+People you name and people you ignore sync across all your devices. Unnamed groupings don't sync. Each device works them out on its own, so the list of unnamed people can look different on desktop and on your phone, even when both show 100% indexed.
+
+To keep the people you have named or ignored consistent across devices, make those changes on one device and let the others sync. Unnamed groupings may still differ because each device creates them locally.
 
 ## Magic Search
 

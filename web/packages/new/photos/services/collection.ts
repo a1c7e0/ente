@@ -372,14 +372,19 @@ const CopyFilesResponse = z.object({
     oldToNewFileIDMap: z.record(z.string(), z.number()),
 });
 
-const currentUserRoleInCollection = (collection: Collection) => {
-    const userID = ensureLocalUser().id;
+const currentUserRoleInCollection = (
+    collection: Collection,
+    userID = ensureLocalUser().id,
+) => {
     if (collection.owner.id == userID) return "OWNER";
     return collection.sharees.find((sharee) => sharee.id == userID)?.role;
 };
 
-export const canAddFilesToCollection = (collection: Collection) => {
-    const role = currentUserRoleInCollection(collection);
+export const canAddFilesToCollection = (
+    collection: Collection,
+    userID?: number,
+) => {
+    const role = currentUserRoleInCollection(collection, userID);
     return role == "OWNER" || role == "ADMIN" || role == "COLLABORATOR";
 };
 
@@ -563,7 +568,7 @@ const splitPendingFavoriteFiles = (files: EnteFile[], userID: number) => {
     return { pendingFiles, remainingFiles };
 };
 
-const forgetPendingFavoriteFileIDs = (fileIDs: number[]) => {
+export const forgetPendingFavoriteFileIDs = (fileIDs: number[]) => {
     if (!fileIDs.length) return;
 
     const deletedFileIDs = new Set(fileIDs);
@@ -1250,9 +1255,23 @@ export const getOrCreateDefaultHiddenCollection = async () =>
     (await savedDefaultHiddenCollection()) ?? createDefaultHiddenCollection();
 
 const savedDefaultHiddenCollection = async () =>
-    (await savedCollections()).find((collection) =>
-        isDefaultHiddenCollection(collection),
+    findUserDefaultHiddenCollection(
+        await savedCollections(),
+        ensureLocalUser().id,
     );
+
+const findUserDefaultHiddenCollection = (
+    collections: readonly Collection[],
+    userID: number,
+) =>
+    collections
+        .filter(
+            (collection) =>
+                collection.owner.id == userID &&
+                isDefaultHiddenCollection(collection),
+        )
+        .sort((a, b) => a.id - b.id)
+        .at(0);
 
 const createDefaultHiddenCollection = () =>
     createCollection(defaultHiddenCollectionName, "album", {
@@ -1499,7 +1518,7 @@ export const movePendingRemovalActionsToUncategorized = async (
         if (isSourceHidden) {
             if (!defaultHiddenCollection) {
                 defaultHiddenCollection =
-                    collections.find(isDefaultHiddenCollection) ??
+                    findUserDefaultHiddenCollection(collections, userID) ??
                     (await createDefaultHiddenCollection());
             }
             targetCollection = defaultHiddenCollection;

@@ -14,7 +14,7 @@ import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/base/id.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
-import "package:photos/models/ml/face/face.dart";
+import "package:photos/models/ml/face/face_with_embedding.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart"
     show flagService, isLocalGalleryMode;
@@ -213,7 +213,7 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
   }
 
   Future<List<_FaceInfo>> _buildFaceInfoList(
-    List<Face> faces,
+    List<FaceWithoutEmbedding> faces,
     Map<String, String?> faceIdsToClusterIds,
     Map<String, PersonEntity> persons,
     Map<String, String> clusterIDToPerson,
@@ -666,8 +666,8 @@ class _FacesItemWidgetState extends State<FacesItemWidget> {
     final clusterIDToPerson = isLocalGallery
         ? <String, String>{}
         : await mlDataDB.getClusterIDToPersonID();
-    final defaultFaces = <Face>[];
-    final remainingFaces = <Face>[];
+    final defaultFaces = <FaceWithoutEmbedding>[];
+    final remainingFaces = <FaceWithoutEmbedding>[];
 
     for (final face in faces) {
       if (face.score >= kMinimumFaceShowScore) {
@@ -837,7 +837,7 @@ class _FaceDataResult {
 }
 
 class _FaceInfo {
-  final Face face;
+  final FaceWithoutEmbedding face;
   final Uint8List faceCrop;
   final String? clusterID;
   final PersonEntity? person;

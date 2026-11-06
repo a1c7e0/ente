@@ -7,7 +7,7 @@ import "package:photos/db/ml/db.dart";
 import "package:photos/events/people_changed_event.dart";
 import "package:photos/models/file/extensions/file_props.dart";
 import "package:photos/models/file/file.dart";
-import "package:photos/models/ml/face/face.dart";
+import "package:photos/models/ml/face/face_with_embedding.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/filedata/filedata_service.dart";
@@ -131,7 +131,8 @@ class MLPhotoResetService {
     final result = <String>{};
     for (final fileID in fileIDs) {
       for (final face
-          in await _dataDB.getFacesForGivenFileID(fileID) ?? <Face>[]) {
+          in await _dataDB.getFacesForGivenFileID(fileID) ??
+              <FaceWithoutEmbedding>[]) {
         if (face.score > 0) result.add(face.faceID);
       }
     }

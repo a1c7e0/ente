@@ -8,6 +8,7 @@ Pod::Spec.new do |s|
   s.source = { :path => '.' }
   s.source_files = 'Classes/**/*'
   s.dependency 'FlutterMacOS'
+  s.frameworks = 'SystemConfiguration'
   s.platform = :osx, '12.0'
 
   s.script_phase = {

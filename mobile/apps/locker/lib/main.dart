@@ -38,6 +38,8 @@ import 'package:locker/services/trash/trash_service.dart';
 import 'package:locker/services/update_service.dart';
 import 'package:locker/src/rust/api/log.dart';
 import 'package:locker/src/rust/frb_generated.dart';
+import 'package:locker/src/rust/third_party/ente_frb_lib/accounts.dart'
+    as accounts;
 import 'package:locker/ui/pages/home_page.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -189,6 +191,7 @@ Future<void> _init(bool bool, {String? via}) async {
     await UserService.instance.init(
       Configuration.instance,
       const HomePage(),
+      createAccountsClient: accounts.createAccountsClient,
       installSourceHandler: InstallSourceHandler(
         hasInstallSource: installSourceService.hasInstallSource,
         autoAttributeSource: installSourceService.autoAttributeSource,

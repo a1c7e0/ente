@@ -11,6 +11,7 @@ import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/face/box.dart";
 import "package:photos/models/ml/face/face.dart";
+import "package:photos/models/ml/face/face_with_embedding.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/machine_learning/body_recognition_service.dart";
 import "package:photos/services/machine_learning/ml_model_download_service.dart";
@@ -34,7 +35,7 @@ class _MLDetectionDebugPageState extends State<MLDetectionDebugPage> {
   String? _path;
   Size? _imageSize;
   int? _fileKey;
-  List<Face> _faces = [];
+  List<FaceWithoutEmbedding> _faces = [];
   BodyIndex? _body;
   List<rust.RustBodyDetection>? _rawBodies;
   bool _faceIndexPresent = false;
@@ -72,7 +73,9 @@ class _MLDetectionDebugPageState extends State<MLDetectionDebugPage> {
       if (_fileKey != null) {
         final faces = await db.getFacesForGivenFileID(_fileKey!);
         _faceIndexPresent = faces != null;
-        _faces = (faces ?? <Face>[]).where((f) => f.score > 0).toList();
+        _faces = (faces ?? <FaceWithoutEmbedding>[])
+            .where((f) => f.score > 0)
+            .toList();
         final raw = (await db.bodyIndexes())[_fileKey];
         _body = raw == null ? null : BodyIndex.tryParse(jsonDecode(raw));
       }
@@ -150,7 +153,19 @@ class _MLDetectionDebugPageState extends State<MLDetectionDebugPage> {
                 .getAssetsDirectory(),
           });
           final faces = (result.faces ?? []).map((face) {
-            return Face.fromFaceResult(face, key, result.decodedImageSize);
+            final detection = Face.fromFaceResult(
+              face,
+              key,
+              result.decodedImageSize,
+            );
+            return FaceWithoutEmbedding(
+              detection.faceID,
+              detection.fileID,
+              detection.score,
+              detection.detection,
+              detection.blur,
+              fileInfo: detection.fileInfo,
+            );
           }).toList();
           final raw = await rust.analyzeBodiesRust(
             fileId: key,

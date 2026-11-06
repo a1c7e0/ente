@@ -5,7 +5,7 @@ import "package:flutter_test/flutter_test.dart";
 import "package:photos/db/ml/base.dart";
 import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/face/detection.dart";
-import "package:photos/models/ml/face/face.dart";
+import "package:photos/models/ml/face/face_with_embedding.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/services/filedata/filedata_service.dart";
 import "package:photos/services/filedata/model/file_data.dart";
@@ -437,8 +437,8 @@ EnteFile _file(int id) => EnteFile()
   ..uploadedFileID = id
   ..ownerID = null;
 
-Face _face(int fileID) =>
-    Face(_faceID(fileID), fileID, const [1.0], 0.9, Detection.empty(), 1.0);
+FaceWithoutEmbedding _face(int fileID) =>
+    FaceWithoutEmbedding(_faceID(fileID), fileID, 0.9, Detection.empty(), 1.0);
 
 String _faceID(int fileID) => "${fileID}_0_0_0_0";
 
@@ -501,7 +501,7 @@ class _MemoryPersons implements PersonService {
 }
 
 class _MemoryMLDB implements IMLDataDB<int> {
-  final Map<int, List<Face>> faces = {};
+  final Map<int, List<FaceWithoutEmbedding>> faces = {};
   final Map<int, String> body = {};
   final Map<String, String> clusterByFace = {};
   final Map<String, Set<String>> rejected = {};
@@ -512,8 +512,9 @@ class _MemoryMLDB implements IMLDataDB<int> {
   final List<List<int>> deletedBodyFiles = [];
 
   @override
-  Future<List<Face>?> getFacesForGivenFileID(int fileUploadID) async =>
-      faces[fileUploadID];
+  Future<List<FaceWithoutEmbedding>?> getFacesForGivenFileID(
+    int fileUploadID,
+  ) async => faces[fileUploadID];
   @override
   Future<Map<String, String?>> getFaceIdsToClusterIds(
     Iterable<String> faceIds,

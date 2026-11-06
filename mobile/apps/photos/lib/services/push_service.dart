@@ -88,7 +88,7 @@ class PushService {
             : null;
         _logger.info("Updating token on server");
         await _setPushTokenOnServer(fcmToken, apnsToken);
-        if (_prefs.getString(Configuration.tokenKey) != sessionToken) return;
+        if (Configuration.instance.getToken() != sessionToken) return;
         await _prefs.setString(kFCMPushToken, fcmToken);
         await _prefs.setInt(
           kLastFCMTokenUpdationTime,
@@ -106,7 +106,7 @@ class PushService {
   Future<void> _setPushTokenOnServer(String fcmToken, String? apnsToken) async {
     String? notificationKey;
     try {
-      if (flagService.internalUser) {
+      if (Platform.isAndroid || flagService.internalUser) {
         notificationKey =
             await NotificationKeyService.generateNotificationKey();
       }

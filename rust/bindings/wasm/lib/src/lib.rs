@@ -17,6 +17,8 @@ pub mod location;
 #[cfg(feature = "locker")]
 pub mod locker;
 mod logging;
+#[cfg(feature = "photos")]
+pub mod photos;
 #[cfg(feature = "prelogin")]
 mod prelogin;
 #[cfg(feature = "session")]

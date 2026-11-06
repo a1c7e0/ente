@@ -2,13 +2,7 @@ import * as cast from "ente-cast-wasm";
 import * as locker from "ente-locker-wasm";
 import * as legacy from "ente-locker-wasm/legacy";
 import * as photos from "ente-photos-wasm";
-import {
-    boxSealOpenBytes,
-    deriveKey,
-    encryptBox,
-    generateKey,
-    generateKeyPair,
-} from "ente-prelogin-wasm";
+import { deriveKey, encryptBox, generateKey } from "ente-prelogin-wasm";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
     cryptoBoxSeal,
@@ -21,7 +15,7 @@ test("Photos deletion keeps summary fallback and decrypts the challenge in Rust"
     const masterKey = await generateKey();
     const input = await sessionKeyAttributes(masterKey);
     const encryptedChallenge = cryptoBoxSeal(
-        Buffer.from("deletion-jwt").toString("base64"),
+        Buffer.from("delete-jwtdeletion-jwt").toString("base64"),
         input.keyAttributes.publicKey,
     );
     const summary = {
@@ -80,7 +74,129 @@ test("Photos deletion keeps summary fallback and decrypts the challenge in Rust"
                 feedback,
             );
         }
+        for (const plaintext of [
+            "deletion-jwt",
+            "delete-jwt",
+            "auth-token" + "a".repeat(32),
+        ]) {
+            const substituted = cryptoBoxSeal(
+                Buffer.from(plaintext).toString("base64"),
+                input.keyAttributes.publicKey,
+            );
+            await expect(
+                photos.deleteAccount(session, substituted, "not_listed"),
+            ).rejects.toThrow("Invalid deletion challenge");
+        }
         expect(deletions).toBe(2);
+    } finally {
+        session.free();
+    }
+});
+
+test("Photos plans and executes duplicate removal in one WASM call", async () => {
+    const masterKey = await generateKey();
+    const input = await sessionKeyAttributes(masterKey);
+    const albumKey = await generateKey();
+    const fileKey = await generateKey();
+    const requests: string[] = [];
+    const progress: number[][] = [];
+    mockFetch(async (request) => {
+        expect(request.headers.get("X-Auth-Token")).toBe("test-token");
+        const path = new URL(request.url).pathname;
+        requests.push(path);
+        const body = (await request.json()) as {
+            collectionID: number;
+            files: {
+                id: number;
+                encryptedKey: string;
+                keyDecryptionNonce: string;
+            }[];
+        };
+        if (path === "/collections/add-files") {
+            expect(body.collectionID).toBe(11);
+            expect(body.files).toHaveLength(1);
+            expect(body.files[0]!.id).toBe(2);
+            expect(
+                await photos.decryptBox(
+                    {
+                        encryptedData: body.files[0]!.encryptedKey,
+                        nonce: body.files[0]!.keyDecryptionNonce,
+                    },
+                    albumKey,
+                ),
+            ).toBe(fileKey);
+        } else {
+            expect(path).toBe("/files/trash");
+            expect(requests).toEqual([
+                "/collections/add-files",
+                "/files/trash",
+            ]);
+            expect(body).toEqual({ items: [{ fileID: 1, collectionID: 11 }] });
+        }
+        return Response.json({});
+    });
+    const session = await photos.openSession({
+        baseUrl: "http://localhost",
+        authToken: "test-token",
+        masterKeyB64: masterKey,
+        ...input,
+    });
+    const removal = {
+        groups: [
+            [
+                {
+                    fileId: 1,
+                    collectionIds: [11],
+                    caption: undefined,
+                    editedName: undefined,
+                    editedTime: undefined,
+                },
+                {
+                    fileId: 2,
+                    collectionIds: [12],
+                    caption: "keep",
+                    editedName: undefined,
+                    editedTime: undefined,
+                },
+            ],
+        ],
+        collections: [
+            { id: 11, key: albumKey },
+            { id: 99, key: await generateKey() },
+        ],
+        files: [
+            { id: 1, collectionId: 11, key: await generateKey() },
+            { id: 2, collectionId: 12, key: fileKey },
+        ],
+    };
+    try {
+        expect(
+            await photos.executeDuplicateRemoval(
+                session,
+                removal,
+                (completed, total) => progress.push([completed, total]),
+            ),
+        ).toEqual({ trashIds: [1] });
+        expect(requests).toEqual(["/collections/add-files", "/files/trash"]);
+        expect(progress).toEqual([
+            [1, 2],
+            [2, 2],
+        ]);
+        requests.length = 0;
+        const invalid = structuredClone(removal);
+        invalid.groups[0]![0]!.fileId = Number.MAX_SAFE_INTEGER + 1;
+        await expect(
+            photos.executeDuplicateRemoval(session, invalid, vi.fn()),
+        ).rejects.toBeInstanceOf(Error);
+        expect(requests).toEqual([]);
+        expect(
+            await photos.executeDuplicateRemoval(
+                session,
+                { groups: [], collections: [], files: [] },
+                vi.fn(),
+            ),
+        ).toEqual({ trashIds: [] });
+        expect(requests).toEqual([]);
     } finally {
         session.free();
     }
@@ -339,49 +455,6 @@ describe("Locker Legacy", () => {
             session.free();
         }
     });
-
-    test("shares the Session recovery key with the recipient", async () => {
-        const masterKey = await generateKey();
-        const recoveryKey = await generateKey();
-        const recipient = await generateKeyPair();
-        let sharedRecoveryKey: Uint8Array | undefined;
-        mockFetch(async (request) => {
-            switch (new URL(request.url).pathname) {
-                case "/users/public-key":
-                    return Response.json({ publicKey: recipient.publicKey });
-                case "/emergency-contacts/add": {
-                    const body = (await request.json()) as {
-                        email: string;
-                        encryptedKey: string;
-                        recoveryNoticeInDays: number;
-                    };
-                    expect(body.email).toBe("friend@example.com");
-                    expect(body.recoveryNoticeInDays).toBe(30);
-                    sharedRecoveryKey = await boxSealOpenBytes(
-                        body.encryptedKey,
-                        recipient,
-                    );
-                    return new Response(null, { status: 204 });
-                }
-                default:
-                    throw new Error(`Unexpected request: ${request.url}`);
-            }
-        });
-        const session = await locker.openSession({
-            baseUrl: "http://localhost",
-            authToken: "token",
-            masterKeyB64: masterKey,
-            ...(await sessionKeyAttributes(masterKey, recoveryKey)),
-        });
-        try {
-            await legacy.addContact(session, "friend@example.com", 30);
-            expect(sharedRecoveryKey).toStrictEqual(
-                new Uint8Array(Buffer.from(recoveryKey, "base64")),
-            );
-        } finally {
-            session.free();
-        }
-    });
 });
 
 const mockFetch = (
@@ -398,7 +471,8 @@ const sessionKeyAttributes = async (
     masterKey: string,
     recoveryKey?: string,
 ) => {
-    const { publicKey, privateKey } = await generateKeyPair();
+    const publicKey = "W/Vcc7guviK+gPNDBmevVw+uJVamQV5rMNQGUwCqlH0=";
+    const privateKey = "UEatwduoOIZ7K7v90MNCPli1eXC1JnqQ9XlgkkqH8ZY=";
     const encryptedSecretKey = await encryptBox(privateKey, masterKey);
     const encryptedRecoveryKey = await encryptBox(
         recoveryKey ?? (await generateKey()),

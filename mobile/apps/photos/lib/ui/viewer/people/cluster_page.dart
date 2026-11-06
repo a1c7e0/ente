@@ -2,7 +2,6 @@ import "dart:async";
 
 import "package:ente_pure_utils/ente_pure_utils.dart";
 import "package:ente_strings/ente_strings.dart";
-import "package:flutter/foundation.dart";
 import "package:flutter/material.dart";
 import "package:photos/core/configuration.dart";
 import "package:photos/core/event_bus.dart";
@@ -44,7 +43,6 @@ class ClusterPage extends StatefulWidget {
   final String? coverHeroTag;
   final String clusterID;
   final PersonEntity? personID;
-  final String appendTitle;
   final bool showNamingBanner;
   final VoidCallback? onFilesChanged;
 
@@ -58,7 +56,6 @@ class ClusterPage extends StatefulWidget {
     this.coverHeroTag,
     required this.clusterID,
     this.personID,
-    this.appendTitle = "",
     this.showNamingBanner = true,
     this.onFilesChanged,
     super.key,
@@ -138,12 +135,6 @@ class _ClusterPageState extends State<ClusterPage> {
         ),
       );
     }
-    kDebugMode && !isBodyReference(widget.clusterID)
-        ? ClusterFeedbackService.instance.debugLogClusterBlurValues(
-            widget.clusterID,
-            clusterSize: files.length,
-          )
-        : null;
   }
 
   @override
@@ -220,7 +211,7 @@ class _ClusterPageState extends State<ClusterPage> {
   Widget build(BuildContext context) {
     final appBar = ClusterAppBar.sliverConfig(
       ClusterPage.appBarType,
-      "${files.length} memories${widget.appendTitle}",
+      "${files.length} memories",
       _selectedFiles,
       widget.clusterID,
       coverAppBarKey: _coverAppBarKey,

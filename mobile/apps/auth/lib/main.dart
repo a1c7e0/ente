@@ -17,6 +17,8 @@ import 'package:ente_auth/services/preference_service.dart';
 import 'package:ente_auth/services/update_service.dart';
 import 'package:ente_auth/services/window_listener_service.dart';
 import 'package:ente_auth/src/rust/frb_generated.dart';
+import 'package:ente_auth/src/rust/third_party/ente_frb_lib/accounts.dart'
+    as accounts;
 import 'package:ente_auth/store/authenticator_db.dart';
 import 'package:ente_auth/store/code_display_store.dart';
 import 'package:ente_auth/store/code_store.dart';
@@ -210,7 +212,11 @@ Future<void> _init() async {
   await Configuration.instance.init([AuthenticatorDB.instance]);
   await cleanupPickedImagesOnStartup(logger: _logger);
   await Network.instance.init(Configuration.instance);
-  await UserService.instance.init(Configuration.instance, const HomePage());
+  await UserService.instance.init(
+    Configuration.instance,
+    const HomePage(),
+    createAccountsClient: accounts.createAccountsClient,
+  );
   await AuthenticatorService.instance.init();
   await BillingService.instance.init();
   await NotificationService.instance.init();

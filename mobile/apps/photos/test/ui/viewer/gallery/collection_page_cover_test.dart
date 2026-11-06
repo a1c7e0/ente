@@ -37,7 +37,8 @@ import "package:photos/models/ignored_file.dart";
 import "package:photos/models/local_entity_data.dart";
 import "package:photos/models/metadata/collection_magic.dart";
 import "package:photos/models/metadata/common_keys.dart";
-import "package:photos/models/ml/face/face.dart";
+import "package:photos/models/ml/face/detection.dart";
+import "package:photos/models/ml/face/face_with_embedding.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/models/search/hierarchical/camera_filter.dart";
 import "package:photos/models/search/hierarchical/face_filter.dart";
@@ -69,7 +70,7 @@ import "package:photos/ui/viewer/gallery/state/gallery_boundaries_provider.dart"
 import "package:photos/ui/viewer/gallery/state/gallery_files_inherited_widget.dart";
 import "package:photos/ui/viewer/gallery/state/inherited_search_filter_data.dart";
 import "package:photos/ui/viewer/gallery/state/search_filter_data_provider.dart";
-import "package:photos/ui/viewer/hierarchicial_search/app_bar_filter_chips.dart";
+import "package:photos/ui/viewer/hierarchical_search/app_bar_filter_chips.dart";
 import "package:photos/ui/viewer/people/person_face_widget.dart";
 import "package:photos/ui/viewer/search/result/magic_result_screen.dart";
 import "package:photos/utils/face/face_thumbnail_cache.dart";
@@ -995,7 +996,13 @@ void main() {
       EntePhotosRust.initMock(api: _FakePhotosRustApi());
       MLDataDB.initialize(preferRust: false);
       Future<void> cacheFace(String cluster, int id) async {
-        final face = Face.empty(id);
+        final face = FaceWithoutEmbedding(
+          "${id}_0_0_0_0",
+          id,
+          0.0,
+          Detection.empty(),
+          0.0,
+        );
         await cachedFaceCropPath(
           face.faceID,
           false,

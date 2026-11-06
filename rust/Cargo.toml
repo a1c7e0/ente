@@ -36,6 +36,7 @@ members = [
     "crates/exif",
     "crates/image",
     "crates/legacy",
+    "crates/live-photo",
     "crates/location",
     "crates/locker",
     "crates/ml",
@@ -74,6 +75,7 @@ ente-frb-lib = { path = "bindings/frb/lib" }
 ente-frb-log = { path = "bindings/frb/log" }
 ente-image = { path = "crates/image" }
 ente-legacy = { path = "crates/legacy" }
+ente-live-photo = { path = "crates/live-photo" }
 ente-location = { path = "crates/location" }
 ente-locker = { path = "crates/locker" }
 ente-ml = { path = "crates/ml" }
@@ -93,6 +95,7 @@ flutter_rust_bridge = "=2.13.0"
 flutter_rust_bridge_codegen = "=2.13.0"
 futures-util = "0.3.32"
 getrandom = { version = "0.4.0", features = ["wasm_js"] }
+hex = "0.4.0"
 hkdf = "0.13.0"
 hmac = "0.13.0"
 icu_casemap = "2.2.0"
@@ -105,12 +108,13 @@ md-5 = "0.11.0"
 mockito = "1.7.2"
 moxcms = "0.9.1"
 open = "5.4.4"
-ort = { version = "=2.0.0-rc.13", default-features = false }
-ort-sys = { version = "=2.0.0-rc.13", default-features = false }
+ort = { version = "=2.0.0-rc.15", default-features = false }
+ort-sys = { version = "=2.0.0-rc.15", default-features = false }
 quick-xml = "0.42.0"
+rayon = "1.12.0"
 regex = "1.13.1"
 reqwest = { version = "0.12.28", default-features = false }
-rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+rusqlite = { version = "0.41.1", default-features = false, features = ["bundled"] }
 same-file = "1.0.6"
 serde = { version = "1.0.229", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"

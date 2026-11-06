@@ -10,7 +10,7 @@ import "package:photos/models/file/file.dart";
 import "package:photos/models/ml/body.dart";
 import "package:photos/models/ml/body_feedback.dart";
 import "package:photos/models/ml/face/box.dart";
-import "package:photos/models/ml/face/face.dart";
+import "package:photos/models/ml/face/face_with_embedding.dart";
 import "package:photos/models/ml/face/person.dart";
 import "package:photos/service_locator.dart";
 import "package:photos/services/machine_learning/body_feedback_service.dart";
@@ -31,7 +31,11 @@ class BodyRecognitionService {
   String? _matchKey;
   List<BodyMatch> _matches = const [];
 
-  Future<BodyIndex> analyze(int fileID, String path, List<Face> faces) async {
+  Future<BodyIndex> analyze(
+    int fileID,
+    String path,
+    List<FaceWithoutEmbedding> faces,
+  ) async {
     final result = await rust.analyzeBodiesRust(
       fileId: fileID,
       imagePath: path,
@@ -40,7 +44,10 @@ class BodyRecognitionService {
     return fromRust(result, faces);
   }
 
-  static BodyIndex fromRust(rust.RustBodyIndex result, List<Face> faces) {
+  static BodyIndex fromRust(
+    rust.RustBodyIndex result,
+    List<FaceWithoutEmbedding> faces,
+  ) {
     final usedFaces = <String>{};
     final bodies = <BodyDetection>[];
     for (final body in result.detections) {

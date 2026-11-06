@@ -2,15 +2,12 @@ import 'dart:async';
 
 import "package:ente_components/ente_components.dart";
 import "package:ente_strings/ente_strings.dart";
-import "package:flutter/foundation.dart";
 import 'package:flutter/material.dart';
 import "package:hugeicons/hugeicons.dart";
 import 'package:logging/logging.dart';
 import 'package:photos/core/configuration.dart';
 import 'package:photos/core/event_bus.dart';
 import "package:photos/db/files_db.dart";
-import 'package:photos/db/ml/base.dart';
-import "package:photos/db/ml/db.dart";
 import "package:photos/events/people_changed_event.dart";
 import 'package:photos/events/subscription_purchased_event.dart';
 import "package:photos/models/file/file.dart";
@@ -97,13 +94,7 @@ class ClusterAppBar extends StatefulWidget {
   State<ClusterAppBar> createState() => _AppBarWidgetState();
 }
 
-enum ClusterPopupAction {
-  setCover,
-  breakupCluster,
-  breakupClusterDebug,
-  ignore,
-  memoryLane,
-}
+enum ClusterPopupAction { setCover, breakupCluster, ignore, memoryLane }
 
 class _AppBarWidgetState extends State<ClusterAppBar> {
   final _logger = Logger("_AppBarWidgetState");
@@ -114,7 +105,6 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
   final GlobalKey shareButtonKey = GlobalKey();
   bool isQuickLink = false;
   late GalleryType galleryType;
-  late final IMLDataDB mlDataDB = MLDataDB.instance;
 
   @override
   void initState() {
@@ -155,14 +145,12 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
         widget.selectedFiles.files.isEmpty &&
             !isLocalGalleryMode &&
             Configuration.instance.hasConfiguredAccount()
-        ? GalleryFilesState.maybeOf(context)?.galleryFilesOrNull
-              ?.where(
-                (file) =>
-                    file.uploadedFileID != null &&
-                    file.ownerID == currentUserID,
-              )
-              .toList()
+        ? GalleryFilesState.maybeOf(context)?.galleryFilesOrNull?.where(
+            (file) =>
+                file.uploadedFileID != null && file.ownerID == currentUserID,
+          )
         : null;
+    final hasShareableFiles = shareableFiles?.isNotEmpty ?? false;
     return GalleryAppBarWidget.sliverConfig(
       widget.type,
       _appBarTitle,
@@ -184,7 +172,7 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
             context,
             onCover: onCover,
             foregroundColor: foregroundColor,
-            shareableFiles: shareableFiles,
+            shareableFiles: hasShareableFiles ? shareableFiles : null,
           ),
     ).buildSliver(context);
   }
@@ -193,7 +181,7 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
     BuildContext context, {
     required bool onCover,
     Color? foregroundColor,
-    required List<EnteFile>? shareableFiles,
+    required Iterable<EnteFile>? shareableFiles,
   }) {
     final hasAccount = Configuration.instance.hasConfiguredAccount();
     final List<Widget> actions = <Widget>[];
@@ -202,7 +190,7 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
     }
 
     if (!isLocalGalleryMode && hasAccount) {
-      if (shareableFiles != null && shareableFiles.isNotEmpty) {
+      if (shareableFiles != null) {
         actions.add(
           IconButtonComponent(
             key: shareButtonKey,
@@ -219,7 +207,7 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
             shouldSurfaceExecutionStates: false,
             onTap: () => showSharePersonSheet(
               context,
-              files: shareableFiles,
+              files: shareableFiles.toList(),
               shareButtonKey: shareButtonKey,
             ),
           ),
@@ -255,15 +243,6 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
             size: IconSizes.small,
           ),
         ),
-        if (kDebugMode && !isBodyReference(widget.clusterID))
-          const EntePopupMenuOption(
-            value: ClusterPopupAction.breakupClusterDebug,
-            label: "Debug mixed grouping",
-            leadingWidget: HugeIcon(
-              icon: HugeIcons.strokeRoundedAiBrain01,
-              size: IconSizes.small,
-            ),
-          ),
       ],
     ];
     if (items.isEmpty) return actions;
@@ -284,8 +263,6 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
             await _breakUpCluster(context);
           } else if (value == ClusterPopupAction.ignore) {
             await _onIgnoredClusterClicked(context);
-          } else if (value == ClusterPopupAction.breakupClusterDebug) {
-            await _breakUpClusterDebug(context);
           } else if (value == ClusterPopupAction.memoryLane) {
             await widget.onMemoryLaneTap?.call();
           }
@@ -355,18 +332,8 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
       firstButtonLabel: context.strings.confirm,
       firstButtonOnTap: () async {
         try {
-          final breakupResult = await ClusterFeedbackService.instance
-              .breakUpCluster(widget.clusterID);
-          final Map<String, List<String>> newClusterIDToFaceIDs =
-              breakupResult.newClusterIdToFaceIds;
-          final Map<String, String> newFaceIdToClusterID =
-              breakupResult.newFaceIdToCluster;
-
-          await mlDataDB.deleteClusterSummary(widget.clusterID);
-          await MLDataDB.instance.clusterSummaryUpdate(
-            breakupResult.newClusterSummaries,
-          );
-          await mlDataDB.updateFaceIdToClusterId(newFaceIdToClusterID);
+          final newClusterIDToFaceIDs = await ClusterFeedbackService.instance
+              .splitCluster(widget.clusterID);
 
           biggestClusterID = '';
           int biggestClusterSize = 0;
@@ -408,40 +375,5 @@ class _AppBarWidgetState extends State<ClusterAppBar> {
         ),
       );
     }
-  }
-
-  Future<void> _breakUpClusterDebug(BuildContext context) async {
-    final breakupResult = await ClusterFeedbackService.instance.breakUpCluster(
-      widget.clusterID,
-    );
-
-    final Map<String, List<String>> newClusterIDToFaceIDs =
-        breakupResult.newClusterIdToFaceIds;
-
-    final allFileIDs = newClusterIDToFaceIDs.values
-        .expand((e) => e)
-        .map((e) => getFileIdFromFaceId<int>(e))
-        .toList();
-
-    final fileIDtoFile = await FilesDB.instance.getFileIDToFileFromIDs(
-      allFileIDs,
-    );
-
-    final newClusterIDToFiles = newClusterIDToFaceIDs.map(
-      (key, value) => MapEntry(
-        key,
-        value
-            .map((faceId) => fileIDtoFile[getFileIdFromFaceId<int>(faceId)]!)
-            .toList(),
-      ),
-    );
-
-    if (!context.mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) =>
-            ClusterBreakupPage(newClusterIDToFiles, context.strings.analysis),
-      ),
-    );
   }
 }
